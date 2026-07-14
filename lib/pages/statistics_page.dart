@@ -9,10 +9,10 @@ class StatisticsPage extends StatefulWidget {
   const StatisticsPage({super.key, required this.book});
 
   @override
-  State<StatisticsPage> createState() => _StatisticsPageState();
+  State<StatisticsPage> createState() => StatisticsPageState();
 }
 
-class _StatisticsPageState extends State<StatisticsPage> {
+class StatisticsPageState extends State<StatisticsPage> {
   int _year = DateTime.now().year;
   int _month = DateTime.now().month;
 
@@ -31,10 +31,12 @@ class _StatisticsPageState extends State<StatisticsPage> {
   @override
   void initState() {
     super.initState();
-    _load();
+    refresh();
   }
 
-  Future<void> _load() async {
+  /// 从数据库重新加载统计（供外部调用）
+  Future<void> refresh() async {
+    if (!mounted) return;
     setState(() => _loading = true);
     final db = DatabaseHelper();
     final summary = await db.getMonthlySummary(widget.book.id, _year, _month);
@@ -58,14 +60,14 @@ class _StatisticsPageState extends State<StatisticsPage> {
 
   void _prevMonth() {
     if (_month == 1) { _month = 12; _year--; } else { _month--; }
-    _load();
+    refresh();
   }
 
   void _nextMonth() {
     final now = DateTime.now();
     if (_year == now.year && _month == now.month) return;
     if (_month == 12) { _month = 1; _year++; } else { _month++; }
-    _load();
+    refresh();
   }
 
   @override
@@ -76,7 +78,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
     return _loading
         ? const Center(child: CircularProgressIndicator())
         : RefreshIndicator(
-            onRefresh: _load,
+            onRefresh: refresh,
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [

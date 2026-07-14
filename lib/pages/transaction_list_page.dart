@@ -11,10 +11,10 @@ class TransactionListPage extends StatefulWidget {
   const TransactionListPage({super.key, required this.book});
 
   @override
-  State<TransactionListPage> createState() => _TransactionListPageState();
+  State<TransactionListPage> createState() => TransactionListPageState();
 }
 
-class _TransactionListPageState extends State<TransactionListPage> {
+class TransactionListPageState extends State<TransactionListPage> {
   List<Transaction> _transactions = [];
   Map<String, Account> _accountMap = {};
   Map<String, Category> _categoryMap = {};
@@ -23,10 +23,12 @@ class _TransactionListPageState extends State<TransactionListPage> {
   @override
   void initState() {
     super.initState();
-    _load();
+    refresh();
   }
 
-  Future<void> _load() async {
+  /// 从数据库重新加载数据（供外部调用）
+  Future<void> refresh() async {
+    setState(() => _loading = true);
     final db = DatabaseHelper();
     final txns = await db.getTransactions(widget.book.id);
     final accounts = await db.getAccounts(widget.book.id);
@@ -91,7 +93,7 @@ class _TransactionListPageState extends State<TransactionListPage> {
     }
 
     return RefreshIndicator(
-      onRefresh: _load,
+      onRefresh: refresh,
       child: ListView.separated(
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
         itemCount: _transactions.length,

@@ -16,6 +16,8 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int _currentIndex = 0;
+  final _txnKey = GlobalKey<TransactionListPageState>();
+  final _statsKey = GlobalKey<StatisticsPageState>();
 
   static const _titles = ['记账', '流水', '统计'];
 
@@ -28,10 +30,11 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    // 用 unique key 确保 IndexedStack 能区分子页面
     final pages = <Widget>[
       RecordPage(book: widget.book, embedded: true),
-      TransactionListPage(book: widget.book),
-      StatisticsPage(book: widget.book),
+      TransactionListPage(key: _txnKey, book: widget.book),
+      StatisticsPage(key: _statsKey, book: widget.book),
     ];
 
     return Scaffold(
@@ -39,7 +42,7 @@ class _HomePageState extends State<HomePage> {
       body: IndexedStack(index: _currentIndex, children: pages),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
-        onTap: (i) => setState(() => _currentIndex = i),
+        onTap: _onTabChanged,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.edit), label: '记账'),
           BottomNavigationBarItem(icon: Icon(Icons.receipt_long), label: '流水'),
@@ -47,5 +50,12 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
     );
+  }
+
+  void _onTabChanged(int i) {
+    setState(() => _currentIndex = i);
+    // 切到流水/统计 tab 时自动刷新数据
+    if (i == 1) _txnKey.currentState?.refresh();
+    if (i == 2) _statsKey.currentState?.refresh();
   }
 }
