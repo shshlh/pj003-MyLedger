@@ -6,7 +6,8 @@ import '../models/category.dart';
 
 class RecordPage extends StatefulWidget {
   final Book book;
-  const RecordPage({super.key, required this.book});
+  final bool embedded; // 嵌入底部导航时隐藏 AppBar
+  const RecordPage({super.key, required this.book, this.embedded = false});
 
   @override
   State<RecordPage> createState() => _RecordPageState();
@@ -138,13 +139,17 @@ class _RecordPageState extends State<RecordPage> {
   Widget build(BuildContext context) {
     if (_loading) {
       return Scaffold(
-        appBar: AppBar(title: Text('${widget.book.name} — 记一笔')),
+        appBar: widget.embedded
+            ? null
+            : AppBar(title: Text('${widget.book.name} — 记一笔')),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
 
     return Scaffold(
-      appBar: AppBar(title: Text('${widget.book.name} — 记一笔')),
+      appBar: widget.embedded
+          ? null
+          : AppBar(title: Text('${widget.book.name} — 记一笔')),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: ListView(

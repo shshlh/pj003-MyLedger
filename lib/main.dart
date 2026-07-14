@@ -4,7 +4,7 @@ import 'database/database_helper.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'models/book.dart';
 import 'models/account.dart';
-import 'pages/record_page.dart';
+import 'pages/home_page.dart';
 
 void main() {
   sqfliteFfiInit();
@@ -73,6 +73,6 @@ class _InitPageState extends State<InitPage> {
   Widget build(BuildContext context) {
     if (_error != null) return Scaffold(body: Center(child: Text('初始化失败: $_error')));
     if (_book == null) return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    return RecordPage(book: _book!);
+    return HomePage(book: _book!);
   }
 }

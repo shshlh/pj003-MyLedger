@@ -276,4 +276,21 @@ class DatabaseHelper {
       default:        return current.add(const Duration(days: 30));
     }
   }
+
+  /// 按月 + 类型 汇总各分类金额（用于统计图表）
+  Future<List<Map<String, dynamic>>> getCategorySummary(
+    String bookId, int year, int month, String type) async {
+    final ym =
+        '${year.toString().padLeft(4, '0')}-${month.toString().padLeft(2, '0')}';
+    return (await db).rawQuery(
+      """SELECT c.id, c.name, COALESCE(SUM(t.amount), 0) AS total
+         FROM transactions t
+         LEFT JOIN categories c ON t.category_id = c.id
+         WHERE t.book_id = ? AND t.type = ? AND t.is_investment = 0
+           AND t.datetime LIKE ?
+         GROUP BY t.category_id
+         ORDER BY total DESC""",
+      [bookId, type, '$ym%'],
+    );
+  }
 }
