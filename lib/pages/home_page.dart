@@ -6,6 +6,7 @@ import 'record_page.dart';
 import 'transaction_list_page.dart';
 import 'statistics_page.dart';
 import 'accounts_page.dart';
+import 'investment_page.dart';
 
 /// 首页：顶部月度概览 + 信用卡总览 + 底部导航切换四个 tab
 class HomePage extends StatefulWidget {
@@ -21,6 +22,7 @@ class HomePageState extends State<HomePage> {
   final _txnKey = GlobalKey<TransactionListPageState>();
   final _statsKey = GlobalKey<StatisticsPageState>();
   final _acctKey = GlobalKey<AccountsPageState>();
+  final _investKey = GlobalKey<InvestmentPageState>();
   final _recordKey = GlobalKey<RecordPageState>();
 
   DateTime _overviewMonth = DateTime.now();
@@ -73,6 +75,7 @@ class HomePageState extends State<HomePage> {
       TransactionListPage(key: _txnKey, book: widget.book),
       StatisticsPage(key: _statsKey, book: widget.book),
       AccountsPage(key: _acctKey, book: widget.book),
+      InvestmentPage(key: _investKey, book: widget.book),
     ];
 
     return Scaffold(
@@ -95,7 +98,8 @@ class HomePageState extends State<HomePage> {
           BottomNavigationBarItem(icon: Icon(Icons.edit), label: '记账'),
           BottomNavigationBarItem(icon: Icon(Icons.receipt_long), label: '流水'),
           BottomNavigationBarItem(icon: Icon(Icons.pie_chart), label: '统计'),
-          BottomNavigationBarItem(icon: Icon(Icons.account_balance_wallet), label: '账户'),
+         BottomNavigationBarItem(icon: Icon(Icons.account_balance_wallet), label: '账户'),
+          BottomNavigationBarItem(icon: Icon(Icons.trending_up), label: '投资'),
         ],
       ),
     );
@@ -214,6 +218,7 @@ class HomePageState extends State<HomePage> {
     if (i == 1) _txnKey.currentState?.refresh();
     if (i == 2) _statsKey.currentState?.refresh();
     if (i == 3) _acctKey.currentState?.refresh();
+    if (i == 4) _investKey.currentState?.refresh();
     if (i == 0) _loadOverview();
     if (i == 0) _recordKey.currentState?.refresh();
   }

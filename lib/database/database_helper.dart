@@ -26,7 +26,7 @@ class DatabaseHelper {
 
   Future<Database> _initDb() async {
     final path = join(await getDatabasesPath(), 'account_book.db');
-    return openDatabase(path, version: 1, onCreate: _createTables, onUpgrade: _upgradeDb);
+    return openDatabase(path, version: 2, onCreate: _createTables, onUpgrade: _upgradeDb);
   }
 
   Future<void> _createTables(Database db, int version) async {
@@ -107,10 +107,53 @@ class DatabaseHelper {
         FOREIGN KEY (book_id) REFERENCES books(id),
         FOREIGN KEY (account_id) REFERENCES accounts(id)
       )
+   ''');
+    await db.execute('''
+      CREATE TABLE investment_holdings (
+        id TEXT PRIMARY KEY,
+        book_id TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        code TEXT NOT NULL,
+        name TEXT,
+        inv_type TEXT NOT NULL,
+        total_cost REAL DEFAULT 0,
+        total_shares REAL DEFAULT 0,
+        latest_nav REAL,
+        nav_date TEXT,
+        fee_type TEXT DEFAULT 'A',
+        is_liquidated INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (book_id) REFERENCES books(id),
+        FOREIGN KEY (account_id) REFERENCES accounts(id)
+      )
     ''');
   }
 
-  Future<void> _upgradeDb(Database db, int oldV, int newV) async {}
+  Future<void> _upgradeDb(Database db, int oldV, int newV) async {
+    if (oldV < 2) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS investment_holdings (
+          id TEXT PRIMARY KEY,
+          book_id TEXT NOT NULL,
+          account_id TEXT NOT NULL,
+          code TEXT NOT NULL,
+          name TEXT,
+          inv_type TEXT NOT NULL,
+          total_cost REAL DEFAULT 0,
+          total_shares REAL DEFAULT 0,
+          latest_nav REAL,
+          nav_date TEXT,
+          fee_type TEXT DEFAULT 'A',
+          is_liquidated INTEGER DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (book_id) REFERENCES books(id),
+          FOREIGN KEY (account_id) REFERENCES accounts(id)
+        )
+      ''');
+    }
+  }
 
   Future<Book> initDefaultBook() async {
     final now = _fmt.format(DateTime.now());
@@ -522,4 +565,135 @@ class DatabaseHelper {
       await txn.delete('transactions', where: 'id=?', whereArgs: [id]);
     });
   }
+
+  /// 基金/股票买入：扣款 + 到投资账户 + 持仓记录（一个事务）
+  Future<void> recordInvestment({
+    required String bookId,
+    required String accountId,
+    required String fromAccountId,
+    required String code,
+    String? name,
+    required String invType,
+    required double amount,
+    required double nav,
+    String feeType = 'A',
+    String? note,
+  }) async {
+    final fee = feeType == 'A' ? amount * 0.0015 : 0.0;
+    final netAmount = amount - fee;
+    final shares = nav > 0 ? netAmount / nav : 0;
+    final now = _fmt.format(DateTime.now());
+    final d = await db;
+    await d.transaction((txn) async {
+      await txn.insert('transactions', {
+        'id': _uuid.v4(), 'book_id': bookId,
+        'account_id': fromAccountId, 'to_account_id': accountId,
+        'type': 'invest', 'amount': amount,
+        'datetime': now, 'note': note ?? code,
+        'is_investment': 1, 'created_at': now,
+      });
+      await txn.rawUpdate(
+        'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
+        [amount, now, fromAccountId]);
+      await txn.rawUpdate(
+        'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+        [amount, now, accountId]);
+      final existing = await txn.query('investment_holdings',
+        where: "book_id=? AND account_id=? AND code=? AND is_liquidated=0",
+        whereArgs: [bookId, accountId, code]);
+      if (existing.isNotEmpty) {
+        final old = existing.first;
+        final oldShares = (old['total_shares'] as num).toDouble();
+        final oldCost = (old['total_cost'] as num).toDouble();
+        await txn.update('investment_holdings', {
+          'total_shares': oldShares + shares,
+          'total_cost': oldCost + amount,
+          'latest_nav': nav, 'nav_date': now, 'updated_at': now,
+        }, where: 'id=?', whereArgs: [old['id']]);
+      } else {
+        await txn.insert('investment_holdings', {
+          'id': _uuid.v4(), 'book_id': bookId,
+          'account_id': accountId, 'code': code, 'name': name,
+          'inv_type': invType, 'total_cost': amount,
+          'total_shares': shares, 'latest_nav': nav,
+          'nav_date': now, 'fee_type': feeType,
+          'is_liquidated': 0, 'created_at': now, 'updated_at': now,
+        });
+      }
+    });
+  }
+
+  /// 获取持仓列表
+  Future<List<Map<String, dynamic>>> getInvestments(String bookId) async {
+    return (await db).query('investment_holdings',
+      where: 'book_id=?', whereArgs: [bookId], orderBy: 'created_at DESC');
+  }
+
+  /// 获取单个持仓
+  Future<Map<String, dynamic>?> getInvestment(String id) async {
+    final list = await (await db).query('investment_holdings',
+      where: 'id=?', whereArgs: [id]);
+    return list.isNotEmpty ? list.first : null;
+  }
+
+  /// 更新净值
+  Future<void> updateNav(String id, double nav, String navDate) async {
+    final now = _fmt.format(DateTime.now());
+    await (await db).update('investment_holdings',
+      {'latest_nav': nav, 'nav_date': navDate, 'updated_at': now},
+      where: 'id=?', whereArgs: [id]);
+  }
+
+  /// 卖出部分份额：资金回到指定账户
+  Future<void> sellInvestment({
+    required String id,
+    required String toAccountId,
+    required double shares,
+    required double nav,
+  }) async {
+    final d = await db;
+    final rows = await d.query('investment_holdings',
+      where: 'id=?', whereArgs: [id]);
+    if (rows.isEmpty) return;
+    final h = rows.first;
+    final totalShares = (h['total_shares'] as num).toDouble();
+    final totalCost = (h['total_cost'] as num).toDouble();
+    if (shares > totalShares) throw Exception('卖出份额超过持仓');
+    final sellAmount = shares * nav;
+    final now = _fmt.format(DateTime.now());
+    final bookId = h['book_id'] as String;
+    final accountId = h['account_id'] as String;
+    final costSold = totalCost * (shares / totalShares);
+    final remainingShares = totalShares - shares;
+    final remainingCost = totalCost - costSold;
+
+    await d.transaction((txn) async {
+      await txn.insert('transactions', {
+        'id': _uuid.v4(), 'book_id': bookId,
+        'account_id': accountId, 'to_account_id': toAccountId,
+        'type': 'invest', 'amount': sellAmount,
+        'datetime': now, 'note': '卖出 ${h['code']}',
+        'is_investment': 1, 'created_at': now,
+      });
+      // 投资账户市值减少
+      await txn.rawUpdate(
+        'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
+        [sellAmount, now, accountId]);
+      // 资金回到日常账户
+      await txn.rawUpdate(
+        'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+        [sellAmount, now, toAccountId]);
+      if (remainingShares <= 0.001) {
+        await txn.update('investment_holdings',
+          {'total_shares': 0, 'total_cost': 0, 'is_liquidated': 1, 'updated_at': now},
+          where: 'id=?', whereArgs: [id]);
+      } else {
+        await txn.update('investment_holdings',
+          {'total_shares': remainingShares, 'total_cost': remainingCost,
+           'latest_nav': nav, 'nav_date': now, 'updated_at': now},
+          where: 'id=?', whereArgs: [id]);
+      }
+    });
+  }
+
 }
