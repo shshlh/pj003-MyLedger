@@ -176,15 +176,17 @@ class DatabaseHelper {
     required String type,
     required double amount,
     String? note,
+    String? datetime,
     int isInvestment = 0,
     String? relatedInvestmentId,
   }) async {
     final now = _fmt.format(DateTime.now());
+    final txnDatetime = datetime ?? now;
     final t = Transaction(
       id: _uuid.v4(), bookId: bookId, accountId: accountId,
       toAccountId: toAccountId, categoryId: categoryId,
       type: type, amount: amount,
-      datetime: now, note: note,
+      datetime: txnDatetime, note: note,
       isInvestment: isInvestment,
       relatedInvestmentId: relatedInvestmentId,
       createdAt: now,
@@ -193,9 +195,18 @@ class DatabaseHelper {
     await d.transaction((txn) async {
       await txn.insert('transactions', t.toMap());
       if (type == 'expense' || type == 'invest') {
-        await txn.rawUpdate(
-          'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
-          [amount, now, accountId]);
+        final acctRows = await txn.query('accounts',
+          columns: ['type'], where: 'id=?', whereArgs: [accountId]);
+        final isCredit = acctRows.isNotEmpty && acctRows.first['type'] == 'credit';
+        if (isCredit) {
+          await txn.rawUpdate(
+            'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+            [amount, now, accountId]);
+        } else {
+          await txn.rawUpdate(
+            'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
+            [amount, now, accountId]);
+        }
       } else if (type == 'income') {
         await txn.rawUpdate(
           'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
@@ -205,9 +216,18 @@ class DatabaseHelper {
           'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
           [amount, now, accountId]);
         if (toAccountId != null) {
-          await txn.rawUpdate(
-            'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
-            [amount, now, toAccountId]);
+          final toRows = await txn.query('accounts',
+            columns: ['type'], where: 'id=?', whereArgs: [toAccountId]);
+          final isCredit = toRows.isNotEmpty && toRows.first['type'] == 'credit';
+          if (isCredit) {
+            await txn.rawUpdate(
+              'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
+              [amount, now, toAccountId]);
+          } else {
+            await txn.rawUpdate(
+              'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+              [amount, now, toAccountId]);
+          }
         }
       }
     });
@@ -292,5 +312,214 @@ class DatabaseHelper {
          ORDER BY total DESC""",
       [bookId, type, '$ym%'],
     );
+  }
+
+  Future<void> updateAccount(Account a) async {
+    await (await db).update('accounts', a.toMap(), where: 'id=?', whereArgs: [a.id]);
+  }
+
+  Future<List<Account>> getAllAccounts(String bookId) async {
+    final list = await (await db).query('accounts',
+      where: "book_id=? AND status!='deleted'",
+      whereArgs: [bookId], orderBy: 'sort_order, name');
+    return list.map((m) => Account.fromMap(m)).toList();
+  }
+
+  static List<DateTime> getBillingCycle(int billingDay, {DateTime? forDate}) {
+    final date = forDate ?? DateTime.now();
+    final year = date.year;
+    final month = date.month;
+    final daysInMonth = DateTime(year, month + 1, 0).day;
+    final effectiveDay = billingDay > daysInMonth ? daysInMonth : billingDay;
+    DateTime start, end;
+    if (date.day <= effectiveDay) {
+      final prevMonth = month == 1 ? 12 : month - 1;
+      final prevYear = month == 1 ? year - 1 : year;
+      final prevDays = DateTime(prevYear, prevMonth + 1, 0).day;
+      final prevEffective = billingDay > prevDays ? prevDays : billingDay;
+      start = DateTime(prevYear, prevMonth, prevEffective);
+      end = DateTime(year, month, effectiveDay);
+    } else {
+      start = DateTime(year, month, effectiveDay);
+      final nextMonth = month == 12 ? 1 : month + 1;
+      final nextYear = month == 12 ? year + 1 : year;
+      final nextDays = DateTime(nextYear, nextMonth + 1, 0).day;
+      final nextEffective = billingDay > nextDays ? nextDays : billingDay;
+      end = DateTime(nextYear, nextMonth, nextEffective);
+    }
+    return [start, end];
+  }
+
+  static DateTime _nextRepayDay(int repayDay, DateTime after) {
+    final m = after.month;
+    final y = after.year;
+    final maxDays = DateTime(y, m + 1, 0).day;
+    final effective = repayDay > maxDays ? maxDays : repayDay;
+    final candidate = DateTime(y, m, effective);
+    if (candidate.isAfter(after)) return candidate;
+    final nextM = m == 12 ? 1 : m + 1;
+    final nextY = m == 12 ? y + 1 : y;
+    final nextMax = DateTime(nextY, nextM + 1, 0).day;
+    final nextEff = repayDay > nextMax ? nextMax : repayDay;
+    return DateTime(nextY, nextM, nextEff);
+  }
+
+  Future<List<Map<String, dynamic>>> getCreditCardSummary(String bookId) async {
+    final d = await db;
+    final cards = await d.query('accounts',
+      where: "book_id=? AND type='credit' AND status='active'",
+      whereArgs: [bookId]);
+    final results = <Map<String, dynamic>>[];
+    final now = DateTime.now();
+    for (final card in cards) {
+      final billingDay = card['billing_day'] as int? ?? 1;
+      final repayDay = card['repayment_day'] as int?;
+      final curCycle = getBillingCycle(billingDay, forDate: now);
+      final curStart = _fmt.format(curCycle[0]);
+      final curEnd = _fmt.format(curCycle[1]);
+      final prevStartDt = DateTime(curCycle[0].year, curCycle[0].month - 1, curCycle[0].day);
+      final prevEndDt = curCycle[0];
+      final prevStart = _fmt.format(prevStartDt);
+     final prevEnd = _fmt.format(prevEndDt);
+
+      final curSpent = await d.rawQuery(
+        "SELECT COALESCE(SUM(amount), 0) AS total FROM transactions "
+        "WHERE book_id=? AND account_id=? AND type='expense' "
+        "AND is_investment=0 AND datetime >= ? AND datetime < ?",
+        [bookId, card['id'], curStart, curEnd]);
+      final currentSpent = (curSpent.first['total'] as num).toDouble();
+
+      final due = await d.rawQuery(
+        "SELECT COALESCE(SUM(amount), 0) AS total FROM transactions "
+        "WHERE book_id=? AND account_id=? AND type='expense' "
+        "AND is_investment=0 AND datetime >= ? AND datetime < ?",
+        [bookId, card['id'], prevStart, prevEnd]);
+      final dueRepaid = await d.rawQuery(
+        "SELECT COALESCE(SUM(amount), 0) AS total FROM transactions "
+        "WHERE book_id=? AND to_account_id=? AND type='transfer' "
+        "AND datetime >= ? AND datetime < ?",
+       [bookId, card['id'], prevEnd, curEnd]);
+      final dueRepaidTotal = (dueRepaid.first['total'] as num).toDouble();
+      double amountDue = ((due.first['total'] as num).toDouble() - dueRepaidTotal).clamp(0, double.infinity);
+
+      int? daysUntilRepay;
+      String? repayDateStr;
+      if (repayDay != null) {
+        final dueDate = _nextRepayDay(repayDay, prevEndDt);
+        repayDateStr = _dayFmt.format(dueDate);
+        daysUntilRepay = dueDate.difference(now).inDays;
+      }
+      results.add({
+        'account_id': card['id'],
+        'name': card['name'],
+        'balance': (card['balance'] as num).toDouble(),
+        'billing_day': billingDay,
+        'repayment_day': repayDay,
+        'cycle_start': curStart,
+        'cycle_end': curEnd,
+        'current_spent': currentSpent,
+        'amount_due': amountDue,
+        'repay_date': repayDateStr,
+        'days_until_repay': daysUntilRepay,
+      });
+    }
+    return results;
+  }
+
+ Future<void> recordChainTransfer({
+   required String bookId,
+   required List<Map<String, dynamic>> nodes,
+    String? datetime,
+ }) async {
+   final d = await db;
+   final now = _fmt.format(DateTime.now());
+    final txnDatetime = datetime ?? now;
+   await d.transaction((txn) async {
+      for (final node in nodes) {
+        final fromId = node['from_id'] as String;
+        final toId = node['to_id'] as String;
+        final amount = (node['amount'] as num).toDouble();
+        await txn.insert('transactions', {
+          'id': _uuid.v4(),
+          'book_id': bookId,
+          'account_id': fromId,
+          'to_account_id': toId,
+         'type': 'transfer',
+         'amount': amount,
+          'datetime': txnDatetime,
+          'is_investment': 0,
+          'created_at': now,
+        });
+        await txn.rawUpdate(
+          'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
+          [amount, now, fromId]);
+        final toRows = await txn.query('accounts',
+          columns: ['type'], where: 'id=?', whereArgs: [toId]);
+        final isCredit = toRows.isNotEmpty && toRows.first['type'] == 'credit';
+        if (isCredit) {
+          await txn.rawUpdate(
+            'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
+            [amount, now, toId]);
+        } else {
+          await txn.rawUpdate(
+            'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+            [amount, now, toId]);
+        }
+      }
+    });
+  }
+
+  /// 删除交易记录并回滚余额
+  Future<void> deleteTransaction(String id) async {
+    final d = await db;
+    await d.transaction((txn) async {
+      final rows = await txn.query('transactions', where: 'id=?', whereArgs: [id]);
+      if (rows.isEmpty) return;
+      final t = Transaction.fromMap(rows.first);
+
+      // 查来源账户类型
+      final fromRows = await txn.query('accounts',
+        columns: ['type'], where: 'id=?', whereArgs: [t.accountId]);
+      final isFromCredit = fromRows.isNotEmpty && fromRows.first['type'] == 'credit';
+
+      void reverseFrom() {
+        if (isFromCredit) {
+          txn.rawUpdate('UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
+            [t.amount, t.createdAt, t.accountId]);
+        } else {
+          txn.rawUpdate('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+            [t.amount, t.createdAt, t.accountId]);
+        }
+      }
+
+      if (t.type == 'expense') {
+        reverseFrom();
+      } else if (t.type == 'income') {
+        await txn.rawUpdate(
+          'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
+          [t.amount, t.createdAt, t.accountId]);
+      } else if (t.type == 'transfer') {
+        // 回滚 from
+        await txn.rawUpdate(
+          'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+          [t.amount, t.createdAt, t.accountId]);
+        // 回滚 to
+        if (t.toAccountId != null) {
+          final toRows = await txn.query('accounts',
+            columns: ['type'], where: 'id=?', whereArgs: [t.toAccountId]);
+          final isToCredit = toRows.isNotEmpty && toRows.first['type'] == 'credit';
+          if (isToCredit) {
+            await txn.rawUpdate(
+              'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+              [t.amount, t.createdAt, t.toAccountId!]);
+          } else {
+            await txn.rawUpdate(
+              'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
+              [t.amount, t.createdAt, t.toAccountId!]);
+          }
+        }
+      }
+      await txn.delete('transactions', where: 'id=?', whereArgs: [id]);
+    });
   }
 }

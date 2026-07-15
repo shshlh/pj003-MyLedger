@@ -23,9 +23,18 @@ class StatisticsPageState extends State<StatisticsPage> {
   bool _loading = true;
 
   static const _pieColors = [
-    Colors.blue, Colors.red, Colors.green, Colors.orange,
-    Colors.purple, Colors.teal, Colors.pink, Colors.indigo,
-    Colors.amber, Colors.cyan, Colors.deepOrange, Colors.lightGreen,
+    Colors.blue,
+    Colors.red,
+    Colors.green,
+    Colors.orange,
+    Colors.purple,
+    Colors.teal,
+    Colors.pink,
+    Colors.indigo,
+    Colors.amber,
+    Colors.cyan,
+    Colors.deepOrange,
+    Colors.lightGreen,
   ];
 
   @override
@@ -40,18 +49,22 @@ class StatisticsPageState extends State<StatisticsPage> {
     setState(() => _loading = true);
     final db = DatabaseHelper();
     final summary = await db.getMonthlySummary(widget.book.id, _year, _month);
-    final expCats = await db.getCategorySummary(widget.book.id, _year, _month, 'expense');
-    final incCats = await db.getCategorySummary(widget.book.id, _year, _month, 'income');
+    final expCats =
+        await db.getCategorySummary(widget.book.id, _year, _month, 'expense');
+    final incCats =
+        await db.getCategorySummary(widget.book.id, _year, _month, 'income');
     if (!mounted) return;
     setState(() {
       _totalExpense = summary['expense'] ?? 0;
       _totalIncome = summary['income'] ?? 0;
       _expenseCats = expCats
-          .map((m) => _CatData(m['name'] as String, (m['total'] as num).toDouble()))
+          .map((m) =>
+              _CatData(m['name'] as String, (m['total'] as num).toDouble()))
           .where((c) => c.amount > 0)
           .toList();
       _incomeCats = incCats
-          .map((m) => _CatData(m['name'] as String, (m['total'] as num).toDouble()))
+          .map((m) =>
+              _CatData(m['name'] as String, (m['total'] as num).toDouble()))
           .where((c) => c.amount > 0)
           .toList();
       _loading = false;
@@ -59,14 +72,24 @@ class StatisticsPageState extends State<StatisticsPage> {
   }
 
   void _prevMonth() {
-    if (_month == 1) { _month = 12; _year--; } else { _month--; }
+    if (_month == 1) {
+      _month = 12;
+      _year--;
+    } else {
+      _month--;
+    }
     refresh();
   }
 
   void _nextMonth() {
     final now = DateTime.now();
     if (_year == now.year && _month == now.month) return;
-    if (_month == 12) { _month = 1; _year++; } else { _month++; }
+    if (_month == 12) {
+      _month = 1;
+      _year++;
+    } else {
+      _month++;
+    }
     refresh();
   }
 
@@ -120,7 +143,7 @@ class StatisticsPageState extends State<StatisticsPage> {
       children: [
         IconButton(onPressed: _prevMonth, icon: const Icon(Icons.chevron_left)),
         Text(
-          '${_year}年${_month}月',
+          '$_year年$_month月',
           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
         ),
         IconButton(
@@ -136,9 +159,9 @@ class StatisticsPageState extends State<StatisticsPage> {
     final balance = _totalIncome - _totalExpense;
     return Row(
       children: [
-        _summaryCard('支出', _totalExpense, Colors.red),
+        _summaryCard('支出', _totalExpense, Colors.green),
         const SizedBox(width: 8),
-        _summaryCard('收入', _totalIncome, Colors.green),
+        _summaryCard('收入', _totalIncome, Colors.red),
         const SizedBox(width: 8),
         _summaryCard('结余', balance, balance >= 0 ? Colors.blue : Colors.red),
       ],
@@ -155,7 +178,8 @@ class StatisticsPageState extends State<StatisticsPage> {
         ),
         child: Column(
           children: [
-            Text(label, style: TextStyle(color: Colors.grey[700], fontSize: 13)),
+            Text(label,
+                style: TextStyle(color: Colors.grey[700], fontSize: 13)),
             const SizedBox(height: 4),
             Text(
               '¥${amount.toStringAsFixed(0)}',
@@ -223,12 +247,14 @@ class StatisticsPageState extends State<StatisticsPage> {
                         ),
                         Text(
                           '¥${d.amount.toStringAsFixed(0)}',
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                          style: const TextStyle(
+                              fontSize: 13, fontWeight: FontWeight.w500),
                         ),
                         const SizedBox(width: 4),
                         Text(
                           '${pct.toStringAsFixed(1)}%',
-                          style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                          style:
+                              TextStyle(fontSize: 12, color: Colors.grey[600]),
                         ),
                       ],
                     ),
@@ -251,7 +277,8 @@ class StatisticsPageState extends State<StatisticsPage> {
         color: _pieColors[i % _pieColors.length],
         value: e.value.amount,
         title: pct >= 5 ? '${pct.toStringAsFixed(0)}%' : '',
-        titleStyle: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+        titleStyle: const TextStyle(
+            color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
         radius: 60,
       );
     }).toList();

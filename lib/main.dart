@@ -29,7 +29,8 @@ class MyApp extends StatelessWidget {
 /// 启动页：初始化数据库，创建默认账本和账户
 class InitPage extends StatefulWidget {
   const InitPage({super.key});
-  @override State<InitPage> createState() => _InitPageState();
+  @override
+  State<InitPage> createState() => _InitPageState();
 }
 
 class _InitPageState extends State<InitPage> {
@@ -49,21 +50,35 @@ class _InitPageState extends State<InitPage> {
       if (book == null) {
         book = await db.initDefaultBook();
         final now = DateTime.now().toIso8601String();
-        final uuid = const Uuid();
+        const uuid = Uuid();
         await db.saveAccount(Account(
-          id: uuid.v4(), bookId: book.id, name: '现金', type: 'cash',
-          createdAt: now, updatedAt: now,
+          id: uuid.v4(),
+          bookId: book.id,
+          name: '现金',
+          type: 'cash',
+          createdAt: now,
+          updatedAt: now,
         ));
         await db.saveAccount(Account(
-          id: uuid.v4(), bookId: book.id, name: '储蓄卡', type: 'debit',
-          createdAt: now, updatedAt: now,
+          id: uuid.v4(),
+          bookId: book.id,
+          name: '储蓄卡',
+          type: 'debit',
+          createdAt: now,
+          updatedAt: now,
         ));
         await db.saveAccount(Account(
-          id: uuid.v4(), bookId: book.id, name: '信用卡', type: 'credit',
-          createdAt: now, updatedAt: now,
+          id: uuid.v4(),
+          bookId: book.id,
+          name: '信用卡',
+          type: 'credit',
+          createdAt: now,
+          updatedAt: now,
         ));
       }
-      setState(() { _book = book; });
+      setState(() {
+        _book = book;
+      });
     } catch (e) {
       setState(() => _error = e.toString());
     }
@@ -71,8 +86,12 @@ class _InitPageState extends State<InitPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_error != null) return Scaffold(body: Center(child: Text('初始化失败: $_error')));
-    if (_book == null) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    if (_error != null) {
+      return Scaffold(body: Center(child: Text('初始化失败: $_error')));
+    }
+    if (_book == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
     return HomePage(book: _book!);
   }
 }
