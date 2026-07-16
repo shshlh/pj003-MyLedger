@@ -20,6 +20,8 @@ class TransactionListPageState extends State<TransactionListPage> {
   Map<String, Account> _accountMap = {};
   Map<String, Category> _categoryMap = {};
   bool _loading = true;
+  Map<int, Map<int, List<Transaction>>> _grouped = {};
+  final Set<String> _expandedMonths = {};
 
   @override
   void initState() {
@@ -35,8 +37,16 @@ class TransactionListPageState extends State<TransactionListPage> {
     final accounts = await db.getAccounts(widget.book.id);
     final cats = await db.getCategories(widget.book.id);
     if (!mounted) return;
+    final grouped = <int, Map<int, List<Transaction>>>{};
+    for (final t in txns) {
+      final dt = DateTime.parse(t.datetime);
+      grouped.putIfAbsent(dt.year, () => {});
+      grouped[dt.year]!.putIfAbsent(dt.month, () => []);
+      grouped[dt.year]![dt.month]!.add(t);
+    }
     setState(() {
       _transactions = txns;
+      _grouped = grouped;
       _accountMap = {for (final a in accounts) a.id: a};
       _categoryMap = {for (final c in cats) c.id: c};
       _loading = false;
@@ -104,16 +114,57 @@ class TransactionListPageState extends State<TransactionListPage> {
 
     return RefreshIndicator(
       onRefresh: refresh,
-      child: ListView.separated(
+      child: ListView(
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-        itemCount: _transactions.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 4),
-        itemBuilder: (context, i) {
-          final t = _transactions[i];
-          final account = _accountMap[t.accountId];
-          final toAccount =
-              t.toAccountId != null ? _accountMap[t.toAccountId] : null;
-          final category = _categoryMap[t.categoryId];
+        children: _buildGroupedList(),
+      ),
+    );
+  }
+
+  List<Widget> _buildGroupedList() {
+    final widgets = <Widget>[];
+    final years = _grouped.keys.toList()..sort((a, b) => b.compareTo(a));
+    for (final year in years) {
+      widgets.add(Padding(
+        padding: const EdgeInsets.only(top: 12, bottom: 4, left: 4),
+        child: Text('$year年', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+      ));
+      final months = _grouped[year]!.keys.toList()..sort((a, b) => b.compareTo(a));
+      for (final month in months) {
+        final key = '$year-$month';
+        final isExpanded = _expandedMonths.contains(key);
+        final txns = _grouped[year]![month]!;
+        widgets.add(
+          InkWell(
+            onTap: () => setState(() {
+              if (isExpanded) { _expandedMonths.remove(key); }
+              else { _expandedMonths.add(key); }
+            }),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+              child: Row(children: [
+                Icon(isExpanded ? Icons.expand_less : Icons.expand_more, size: 18, color: Colors.grey),
+                const SizedBox(width: 4),
+                Text('${month}月 (${txns.length})', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+              ]),
+            ),
+          ),
+        );
+        if (isExpanded) {
+          for (final t in txns) {
+            widgets.add(_buildTransactionCard(t));
+            widgets.add(const SizedBox(height: 4));
+          }
+        }
+      }
+    }
+    return widgets;
+  }
+
+  Widget _buildTransactionCard(Transaction t) {
+    final account = _accountMap[t.accountId];
+    final toAccount = t.toAccountId != null ? _accountMap[t.toAccountId] : null;
+    final category = _categoryMap[t.categoryId];
 
           String title;
           if (t.type == 'transfer') {
@@ -144,9 +195,17 @@ class TransactionListPageState extends State<TransactionListPage> {
               ),
               title: Text(title,
                   style: const TextStyle(fontWeight: FontWeight.w500)),
-              subtitle: Text(
-                '${_formatDate(t.datetime)} · $subtitle',
-                style: TextStyle(color: Colors.grey[600], fontSize: 13),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${_formatDate(t.datetime)} · $subtitle',
+                    style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                  ),
+                  if (t.type == 'invest' && _investDetail(t) != null)
+                    Text(_investDetail(t)!,
+                        style: TextStyle(color: Colors.grey[500], fontSize: 11)),
+                ],
               ),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -178,10 +237,14 @@ class TransactionListPageState extends State<TransactionListPage> {
               ),
             ),
           );
-        },
-      ),
-    );
-  }
+    }
+
+    String? _investDetail(Transaction t) {
+      if (t.type != 'invest' || t.note == null) return null;
+      final parts = t.note!.split(' ');
+      if (parts.length < 5) return null;
+      return '${parts[2]} ${parts[3]} ${parts[4]}';
+    }
 
   void _editTransaction(Transaction t) {
     final amountCtrl = TextEditingController(text: t.amount.toStringAsFixed(2));
