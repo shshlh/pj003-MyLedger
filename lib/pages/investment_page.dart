@@ -47,6 +47,13 @@ class InvestmentPageState extends State<InvestmentPage> {
     );
   }
 
+  void _openSwitch() {
+    showModalBottomSheet(
+      context: context, isScrollControlled: true,
+      builder: (_) => _SwitchForm(bookId: widget.book.id, onSaved: refresh),
+    );
+  }
+
   void _openNavUpdate(Map<String, dynamic> holding) {
     final codeCtrl = TextEditingController(text: (holding["latest_nav"] ?? "").toString());
     showDialog(
@@ -90,6 +97,8 @@ class InvestmentPageState extends State<InvestmentPage> {
                   Text("暂无持仓", style: TextStyle(color: Colors.grey[600], fontSize: 16)),
                   const SizedBox(height: 16),
                   FilledButton.tonal(onPressed: _openBuy, child: const Text("买入第一笔")),
+                  const SizedBox(height: 8),
+                  OutlinedButton(onPressed: _openSwitch, child: const Text("基金转换")),
                 ],
               ),
             )
@@ -167,7 +176,7 @@ class InvestmentPageState extends State<InvestmentPage> {
               _infoItem("市值", "¥${NumberFormat("#,##0.00").format(marketValue)}"),
               if (nav != null)
                 Text(
-                  "${profit >= 0 ? "+" : ""}¥${NumberFormat("#,##0.00").format(profit)} (${profitRate >= 0 ? "+" : ""}${profitRate.toStringAsFixed(1)}%)",
+                  "${profit >= 0 ? "+" : ""}¥${NumberFormat("#,##0.00").format(profit)} (${profitRate >= 0 ? "+" : ""}${profitRate.toStringAsFixed(2)}%)",
                   style: TextStyle(
                     fontSize: 13, fontWeight: FontWeight.w600,
                     color: profit >= 0 ? Colors.green : Colors.red,
@@ -208,6 +217,8 @@ class _BuyFormState extends State<_BuyForm> {
   final _nameCtrl = TextEditingController();
   final _amountCtrl = TextEditingController();
   final _navCtrl = TextEditingController();
+  final _feeCtrl = TextEditingController();
+  final _buySharesCtrl = TextEditingController();
   final _fmt = DateFormat('yyyy-MM-dd HH:mm');
   DateTime _dateTime = DateTime.now();
   List<Account> _accounts = [];
@@ -227,6 +238,7 @@ class _BuyFormState extends State<_BuyForm> {
   void dispose() {
     _codeCtrl.dispose(); _nameCtrl.dispose();
     _amountCtrl.dispose(); _navCtrl.dispose();
+    _feeCtrl.dispose(); _buySharesCtrl.dispose();
     super.dispose();
   }
 
@@ -246,7 +258,10 @@ class _BuyFormState extends State<_BuyForm> {
     final code = _codeCtrl.text.trim();
     final amount = double.tryParse(_amountCtrl.text);
     final nav = double.tryParse(_navCtrl.text);
-    if (code.isEmpty || amount == null || amount <= 0 || nav == null || nav <= 0) return;
+    final userFee = double.tryParse(_feeCtrl.text);
+    final userShares = double.tryParse(_buySharesCtrl.text);
+   if (code.isEmpty || amount == null || amount <= 0) return;
+    if (nav == null || nav <= 0) return;
     if (_fromAccountId == null || _toAccountId == null) return;
     setState(() => _saving = true);
     final note = _nameCtrl.text.trim();
@@ -260,6 +275,8 @@ class _BuyFormState extends State<_BuyForm> {
       amount: amount,
       nav: nav,
       feeType: _feeType,
+      extraFee: userFee,
+      extraShares: userShares,
       datetime: _fmt.format(_dateTime),
     );
     widget.onSaved();
@@ -283,7 +300,11 @@ class _BuyFormState extends State<_BuyForm> {
           Row(children: [
             Expanded(child: TextField(controller: _amountCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: "买入金额", border: OutlineInputBorder()))),
             const SizedBox(width: 12),
-            Expanded(child: TextField(controller: _navCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: "当日净值", border: OutlineInputBorder()))),
+        Expanded(child: TextField(controller: _navCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: "当日净值", border: OutlineInputBorder()))),
+          const SizedBox(width: 12),
+          Expanded(child: TextField(controller: _feeCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: "手续费", border: OutlineInputBorder()))),
+          const SizedBox(width: 12),
+          Expanded(child: TextField(controller: _buySharesCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: "确认份额", border: OutlineInputBorder()))),
           ]),
           if (_feeType != "custom") const SizedBox(height: 12),
           if (_feeType != "custom")
@@ -444,21 +465,6 @@ class _SellFormState extends State<_SellForm> {
                 .toList(),
             onChanged: (v) { if (v != null) setState(() => _toAccountId = v); },
           ),
-          const SizedBox(height: 12),
-          InkWell(
-            onTap: () async {
-              final d = await showDatePicker(context: context, initialDate: _dateTime, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 1)));
-              if (d == null) return;
-              final t = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(_dateTime));
-              if (t == null) return;
-              setState(() => _dateTime = DateTime(d.year, d.month, d.day, t.hour, t.minute));
-            },
-            child: InputDecorator(
-              decoration: const InputDecoration(labelText: '日期时间', border: OutlineInputBorder(), suffixIcon: Icon(Icons.access_time)),
-              child: Text(_fmt.format(_dateTime), style: const TextStyle(fontSize: 15)),
-            ),
-          ),
-          const SizedBox(height: 12),
           InkWell(
             onTap: () async {
               final d = await showDatePicker(context: context, initialDate: _dateTime, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 1)));
@@ -477,6 +483,180 @@ class _SellFormState extends State<_SellForm> {
             onPressed: _saving ? null : _save,
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             child: Text(_saving ? "处理中..." : (_liquidateAll ? "确认清仓" : "确认卖出"), style: const TextStyle(fontSize: 16)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+/// 基金转换表单
+class _SwitchForm extends StatefulWidget {
+  final String bookId;
+  final VoidCallback onSaved;
+  const _SwitchForm({required this.bookId, required this.onSaved});
+  @override
+  State<_SwitchForm> createState() => _SwitchFormState();
+}
+
+class _SwitchFormState extends State<_SwitchForm> {
+  final _fromCodeCtrl = TextEditingController();
+  final _fromSharesCtrl = TextEditingController();
+  final _fromNavCtrl = TextEditingController();
+  final _toCodeCtrl = TextEditingController();
+  final _toNameCtrl = TextEditingController();
+  final _toSharesCtrl = TextEditingController();
+  final _toNavCtrl = TextEditingController();
+  final _feeCtrl = TextEditingController();
+  final _refundCtrl = TextEditingController();
+  final _fmt = DateFormat('yyyy-MM-dd HH:mm');
+  DateTime _dateTime = DateTime.now();
+  List<Account> _accounts = [];
+  String? _refundAccountId;
+  String? _investAccountId;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _fromCodeCtrl.dispose(); _fromSharesCtrl.dispose(); _fromNavCtrl.dispose();
+    _toCodeCtrl.dispose(); _toNameCtrl.dispose(); _toSharesCtrl.dispose(); _toNavCtrl.dispose();
+    _feeCtrl.dispose(); _refundCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final accs = await DatabaseHelper().getAccounts(widget.bookId);
+    setState(() {
+      _accounts = accs.where((a) => a.status == "active").toList();
+      final funds = _accounts.where((a) => a.type == "fund").toList();
+      _investAccountId = funds.isNotEmpty ? funds.first.id : null;
+      final dailies = _accounts.where((a) => a.type != "fund" && a.type != "credit").toList();
+      _refundAccountId = dailies.isNotEmpty ? dailies.first.id : null;
+    });
+  }
+
+  Future<void> _save() async {
+    final fromShares = double.tryParse(_fromSharesCtrl.text);
+    final fromNav = double.tryParse(_fromNavCtrl.text);
+    final toShares = double.tryParse(_toSharesCtrl.text);
+    final toNav = double.tryParse(_toNavCtrl.text);
+    final fee = double.tryParse(_feeCtrl.text) ?? 0;
+    final refund = double.tryParse(_refundCtrl.text) ?? 0;
+    if (_fromCodeCtrl.text.isEmpty || fromShares == null || fromNav == null || fromNav <= 0) return;
+    if (_toCodeCtrl.text.isEmpty || toShares == null || toShares <= 0 || toNav == null || toNav <= 0) return;
+    if (_investAccountId == null) return;
+    setState(() => _saving = true);
+
+    // 查找是否已有持仓A
+    final holdings = await DatabaseHelper().getInvestments(widget.bookId);
+    final fromHolding = holdings.where((h) =>
+        h['code'] == _fromCodeCtrl.text.trim() &&
+        h['account_id'] == _investAccountId &&
+        h['is_liquidated'] == 0
+    ).toList();
+    if (fromHolding.isEmpty) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('未找到转出基金持仓')));
+      setState(() => _saving = false);
+      return;
+    }
+
+    await DatabaseHelper().switchFund(
+      bookId: widget.bookId,
+      fromAccountId: _investAccountId!,
+      fromHoldingId: fromHolding.first['id'],
+      fromShares: fromShares,
+      fromNav: fromNav,
+      toCode: _toCodeCtrl.text.trim(),
+      toName: _toNameCtrl.text.isNotEmpty ? _toNameCtrl.text.trim() : null,
+      toShares: toShares,
+      toNav: toNav,
+      fee: fee,
+      refund: refund,
+      refundAccountId: _refundAccountId,
+      datetime: _fmt.format(_dateTime),
+    );
+
+    widget.onSaved();
+    if (mounted) Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dailies = _accounts.where((a) => a.type != "fund" && a.type != "credit").toList();
+    final funds = _accounts.where((a) => a.type == "fund").toList();
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, 24, 16, MediaQuery.of(context).viewInsets.bottom + 16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text("基金转换", style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+          const Divider(),
+          const Text("转出基金 A", style: TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(child: TextField(controller: _fromCodeCtrl, decoration: const InputDecoration(labelText: "基金代码", border: OutlineInputBorder(), isDense: true))),
+            const SizedBox(width: 8),
+            Expanded(child: TextField(controller: _fromSharesCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: "确认转出份额", border: OutlineInputBorder(), isDense: true))),
+            const SizedBox(width: 8),
+            Expanded(child: TextField(controller: _fromNavCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: "确认转出净值", border: OutlineInputBorder(), isDense: true))),
+          ]),
+          const Divider(),
+          const Text("转入基金 B", style: TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(child: TextField(controller: _toCodeCtrl, decoration: const InputDecoration(labelText: "基金代码", border: OutlineInputBorder(), isDense: true))),
+            const SizedBox(width: 8),
+            Expanded(child: TextField(controller: _toNameCtrl, decoration: const InputDecoration(labelText: "基金名称", border: OutlineInputBorder(), isDense: true))),
+          ]),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(child: TextField(controller: _toSharesCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: "确认转入份额", border: OutlineInputBorder(), isDense: true))),
+            const SizedBox(width: 8),
+            Expanded(child: TextField(controller: _toNavCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: "确认转入净值", border: OutlineInputBorder(), isDense: true))),
+          ]),
+          const Divider(),
+          const Text("费用与退回", style: TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(child: TextField(controller: _feeCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: "手续费", border: OutlineInputBorder(), isDense: true))),
+            const SizedBox(width: 8),
+            Expanded(child: TextField(controller: _refundCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: "退回金额", border: OutlineInputBorder(), isDense: true))),
+            const SizedBox(width: 8),
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                value: _refundAccountId,
+                decoration: const InputDecoration(labelText: "退回账户", border: OutlineInputBorder(), isDense: true),
+                items: dailies.map((a) => DropdownMenuItem(value: a.id, child: Text(a.name, style: const TextStyle(fontSize: 13)))).toList(),
+                onChanged: (v) { if (v != null) setState(() => _refundAccountId = v); },
+              ),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          InkWell(
+            onTap: () async {
+              final d = await showDatePicker(context: context, initialDate: _dateTime, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 1)));
+              if (d == null) return;
+              final t = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(_dateTime));
+              if (t == null) return;
+              setState(() => _dateTime = DateTime(d.year, d.month, d.day, t.hour, t.minute));
+            },
+            child: InputDecorator(
+              decoration: const InputDecoration(labelText: '日期时间', border: OutlineInputBorder(), suffixIcon: Icon(Icons.access_time)),
+              child: Text(_fmt.format(_dateTime), style: const TextStyle(fontSize: 15)),
+            ),
+          ),
+          const SizedBox(height: 16),
+          FilledButton(
+            onPressed: _saving ? null : _save,
+            child: Text(_saving ? "处理中..." : "确认转换", style: const TextStyle(fontSize: 16)),
           ),
         ],
       ),

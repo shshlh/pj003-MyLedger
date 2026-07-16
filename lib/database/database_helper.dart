@@ -537,6 +537,27 @@ class DatabaseHelper {
 
       if (t.type == 'expense') {
         reverseFrom();
+      } else if (t.type == 'invest' && t.relatedInvestmentId != null) {
+        final hRows = await txn.query('investment_holdings',
+          where: 'id=?', whereArgs: [t.relatedInvestmentId]);
+        if (hRows.isNotEmpty) {
+          final h = hRows.first;
+          final oldShares = (h['total_shares'] as num).toDouble();
+          final oldCost = (h['total_cost'] as num).toDouble();
+          double costRatio = oldCost > 0 ? (t.amount / oldCost).clamp(0, 1) : 0;
+          double sharesToRemove = oldShares * costRatio;
+          double newShares = (oldShares - sharesToRemove).clamp(0, double.infinity);
+          double newCost = (oldCost - t.amount).clamp(0, double.infinity);
+          if (newShares <= 0.001) {
+            await txn.update('investment_holdings',
+              {'total_shares': 0, 'total_cost': 0, 'is_liquidated': 1, 'updated_at': t.createdAt},
+              where: 'id=?', whereArgs: [t.relatedInvestmentId]);
+          } else {
+            await txn.update('investment_holdings',
+              {'total_shares': newShares, 'total_cost': newCost, 'updated_at': t.createdAt},
+              where: 'id=?', whereArgs: [t.relatedInvestmentId]);
+          }
+        }
       } else if (t.type == 'income') {
         await txn.rawUpdate(
           'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
@@ -576,22 +597,26 @@ class DatabaseHelper {
     required String invType,
     required double amount,
     required double nav,
-    String feeType = 'A',
-    String? note,
+   String feeType = 'A',
+    double? extraFee,
+    double? extraShares,
+   String? note,
     String? datetime,
   }) async {
-    final fee = feeType == 'A' ? amount * 0.0015 : 0.0;
+    final fee = extraFee ?? (feeType == 'A' ? amount * 0.0015 : 0.0);
     final netAmount = amount - fee;
-    final shares = nav > 0 ? netAmount / nav : 0;
+    final shares = extraShares ?? (nav > 0 ? netAmount / nav : 0);
     final now = _fmt.format(DateTime.now());
     final txnDatetime = datetime ?? now;
     final d = await db;
     await d.transaction((txn) async {
+      final txnId = _uuid.v4();
+      final detailNote = '买入 ' + (note ?? code) + ' 净值$nav 份额${shares.toStringAsFixed(2)} 手续费${fee.toStringAsFixed(2)}';
       await txn.insert('transactions', {
-        'id': _uuid.v4(), 'book_id': bookId,
+        'id': txnId, 'book_id': bookId,
         'account_id': fromAccountId, 'to_account_id': accountId,
         'type': 'invest', 'amount': amount,
-        'datetime': txnDatetime, 'note': note ?? code,
+        'datetime': txnDatetime, 'note': detailNote,
         'is_investment': 1, 'created_at': now,
       });
       await txn.rawUpdate(
@@ -603,18 +628,21 @@ class DatabaseHelper {
       final existing = await txn.query('investment_holdings',
         where: "book_id=? AND account_id=? AND code=? AND is_liquidated=0",
         whereArgs: [bookId, accountId, code]);
+      String? holdingId;
       if (existing.isNotEmpty) {
         final old = existing.first;
+        holdingId = old['id'] as String;
         final oldShares = (old['total_shares'] as num).toDouble();
         final oldCost = (old['total_cost'] as num).toDouble();
         await txn.update('investment_holdings', {
           'total_shares': oldShares + shares,
           'total_cost': oldCost + amount,
           'latest_nav': nav, 'nav_date': now, 'updated_at': now,
-        }, where: 'id=?', whereArgs: [old['id']]);
+        }, where: 'id=?', whereArgs: [holdingId]);
       } else {
+        holdingId = _uuid.v4();
         await txn.insert('investment_holdings', {
-          'id': _uuid.v4(), 'book_id': bookId,
+          'id': holdingId, 'book_id': bookId,
           'account_id': accountId, 'code': code, 'name': name,
           'inv_type': invType, 'total_cost': amount,
           'total_shares': shares, 'latest_nav': nav,
@@ -622,6 +650,23 @@ class DatabaseHelper {
           'is_liquidated': 0, 'created_at': now, 'updated_at': now,
         });
       }
+      // 关联交易与持仓
+      await txn.rawUpdate(
+        'UPDATE transactions SET related_investment_id = ? WHERE id = ?',
+        [holdingId, txnId]);
+      // 按市值重算投资账户余额
+      final allH = await txn.query('investment_holdings',
+        where: "account_id=? AND is_liquidated=0",
+        whereArgs: [accountId]);
+      double tv = 0;
+      for (final h in allH) {
+        final s = (h['total_shares'] as num).toDouble();
+        final n = (h['latest_nav'] as num?)?.toDouble();
+        if (n != null) tv += s * n;
+      }
+      await txn.rawUpdate(
+        'UPDATE accounts SET balance = ?, updated_at = ? WHERE id = ?',
+        [tv, now, accountId]);
     });
   }
 
@@ -639,11 +684,32 @@ class DatabaseHelper {
   }
 
   /// 更新净值
-  Future<void> updateNav(String id, double nav, String navDate) async {
-    final now = _fmt.format(DateTime.now());
-    await (await db).update('investment_holdings',
-      {'latest_nav': nav, 'nav_date': navDate, 'updated_at': now},
-      where: 'id=?', whereArgs: [id]);
+ Future<void> updateNav(String id, double nav, String navDate) async {
+   final now = _fmt.format(DateTime.now());
+    final d = await db;
+    await d.transaction((txn) async {
+      await txn.update('investment_holdings',
+        {'latest_nav': nav, 'nav_date': navDate, 'updated_at': now},
+        where: 'id=?', whereArgs: [id]);
+      // 查找此持仓所在的投资账户
+      final hRows = await txn.query('investment_holdings',
+        columns: ['account_id'], where: 'id=?', whereArgs: [id]);
+      if (hRows.isEmpty) return;
+      final accountId = hRows.first['account_id'] as String;
+      // 查询该账户下所有持仓，按最新净值重算市值
+      final all = await txn.query('investment_holdings',
+        where: "account_id=? AND is_liquidated=0",
+        whereArgs: [accountId]);
+      double totalValue = 0;
+      for (final h in all) {
+        final shares = (h['total_shares'] as num).toDouble();
+        final n = (h['latest_nav'] as num?)?.toDouble();
+        if (n != null) totalValue += shares * n;
+      }
+      await txn.rawUpdate(
+        'UPDATE accounts SET balance = ?, updated_at = ? WHERE id = ?',
+        [totalValue, now, accountId]);
+    });
   }
 
   /// 卖出部分份额：资金回到指定账户
@@ -718,6 +784,116 @@ class DatabaseHelper {
            'latest_nav': nav, 'nav_date': now, 'updated_at': now},
           where: 'id=?', whereArgs: [id]);
       }
+    });
+  }
+
+
+  /// 基金转换：卖出A + 买入B + 手续费 + 退回
+  Future<void> switchFund({
+    required String bookId,
+    required String fromAccountId,
+    required String fromHoldingId,
+    required double fromShares,
+    required double fromNav,
+    required String toCode,
+    String? toName,
+    required double toShares,
+    required double toNav,
+    required double fee,
+    required double refund,
+    required String? refundAccountId,
+    String? datetime,
+  }) async {
+    final d = await db;
+    final now = _fmt.format(DateTime.now());
+    final txnD = datetime ?? now;
+    final rows = await d.query('investment_holdings',
+      where: 'id=?', whereArgs: [fromHoldingId]);
+    if (rows.isEmpty) return;
+    final h = rows.first;
+    final totalShares = (h['total_shares'] as num).toDouble();
+    final totalCost = (h['total_cost'] as num).toDouble();
+    if (fromShares > totalShares) return;
+    final costSold = totalCost * (fromShares / totalShares);
+    final remainingShares = totalShares - fromShares;
+    final remainingCost = totalCost - costSold;
+    final fromAmount = fromShares * fromNav;
+
+    await d.transaction((txn) async {
+      // 卖出A
+      await txn.insert('transactions', {
+        'id': _uuid.v4(), 'book_id': bookId,
+        'account_id': fromAccountId,
+        'type': 'invest', 'amount': fromAmount,
+        'datetime': txnD, 'note': '转换转出 ' + (h['code'] as String),
+        'is_investment': 1, 'created_at': now,
+      });
+      if (remainingShares <= 0.001) {
+        await txn.update('investment_holdings',
+          {'total_shares': 0, 'total_cost': 0, 'is_liquidated': 1, 'updated_at': now},
+          where: 'id=?', whereArgs: [fromHoldingId]);
+      } else {
+        await txn.update('investment_holdings',
+          {'total_shares': remainingShares, 'total_cost': remainingCost, 'updated_at': now},
+          where: 'id=?', whereArgs: [fromHoldingId]);
+      }
+      // 买入B
+      final existing = await txn.query('investment_holdings',
+        where: "book_id=? AND account_id=? AND code=? AND is_liquidated=0",
+        whereArgs: [bookId, fromAccountId, toCode]);
+      if (existing.isNotEmpty) {
+        final o = existing.first;
+        final oldShares = (o['total_shares'] as num).toDouble();
+        final oldCost = (o['total_cost'] as num).toDouble();
+        await txn.update('investment_holdings',
+          {'total_shares': oldShares + toShares, 'total_cost': oldCost + fromAmount,
+           'latest_nav': toNav, 'nav_date': txnD, 'updated_at': now},
+          where: 'id=?', whereArgs: [o['id']]);
+      } else {
+        await txn.insert('investment_holdings', {
+          'id': _uuid.v4(), 'book_id': bookId, 'account_id': fromAccountId,
+          'code': toCode, 'name': toName, 'inv_type': 'fund',
+          'total_cost': fromAmount, 'total_shares': toShares,
+          'latest_nav': toNav, 'nav_date': txnD, 'fee_type': 'custom',
+          'is_liquidated': 0, 'created_at': now, 'updated_at': now,
+        });
+      }
+      // 手续费
+      if (fee > 0) {
+        await txn.insert('transactions', {
+          'id': _uuid.v4(), 'book_id': bookId,
+          'account_id': fromAccountId,
+          'type': 'expense', 'amount': fee,
+          'datetime': txnD, 'note': '转换手续费',
+          'is_investment': 1, 'created_at': now,
+        });
+      }
+      // 退回
+      if (refund > 0 && refundAccountId != null) {
+        await txn.insert('transactions', {
+          'id': _uuid.v4(), 'book_id': bookId,
+          'account_id': refundAccountId,
+          'type': 'income', 'amount': refund,
+          'datetime': txnD, 'note': '转换退回',
+          'is_investment': 1, 'created_at': now,
+        });
+        await txn.rawUpdate(
+          'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+          [refund, now, refundAccountId]);
+      }
+      // 更新投资账户余额
+      final allH = await txn.query('investment_holdings',
+        where: "account_id=? AND is_liquidated=0",
+        whereArgs: [fromAccountId]);
+      double tv = 0;
+      for (final h2 in allH) {
+        final s = (h2['total_shares'] as num).toDouble();
+        final n = (h2['latest_nav'] as num?)?.toDouble();
+        if (n != null) tv += s * n;
+      }
+      await txn.rawUpdate(
+        'UPDATE accounts SET balance = ?, updated_at = ? WHERE id = ?',
+        [tv, now, fromAccountId]);
     });
   }
 
