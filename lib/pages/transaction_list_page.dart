@@ -57,19 +57,21 @@ class TransactionListPageState extends State<TransactionListPage> {
       case 'income':
         return Icons.arrow_downward;
       case 'transfer':
-        return Icons.swap_horiz;
-      default:
+       return Icons.swap_horiz;
+      case 'invest':
+        return Icons.trending_up;
+     default:
         return Icons.arrow_upward;
     }
   }
 
   Color _amountColor(String type) {
     switch (type) {
-      case 'income':
+      case 'income':   return Colors.red;
         return Colors.red;
-      case 'transfer':
+      case 'transfer': return Colors.blue;
         return Colors.blue;
-      default:
+      default:         return Colors.green;
         return Colors.green;
     }
   }
@@ -116,9 +118,16 @@ class TransactionListPageState extends State<TransactionListPage> {
               t.toAccountId != null ? _accountMap[t.toAccountId] : null;
           final category = _categoryMap[t.categoryId];
 
-          final title = t.type == 'transfer'
-              ? '${account?.name ?? "?"} → ${toAccount?.name ?? "?"}'
-              : category?.name ?? '未分类';
+          String title;
+          if (t.type == 'transfer') {
+            title = '${account?.name ?? "?"} → ${toAccount?.name ?? "?"}';
+          } else if (t.type == 'invest') {
+            title = t.note ?? '赎回本金';
+          } else if (t.isInvestment == 1 && (t.type == 'income' || t.type == 'expense')) {
+            title = t.note ?? '投资收益';
+          } else {
+            title = category?.name ?? '未分类';
+          }
           final subtitle = [
             account?.name,
             if (t.note != null && t.note!.isNotEmpty) t.note,

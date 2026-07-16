@@ -218,8 +218,8 @@ class DatabaseHelper {
     String? categoryId,
     required String type,
     required double amount,
-    String? note,
-    String? datetime,
+   String? note,
+   String? datetime,
     int isInvestment = 0,
     String? relatedInvestmentId,
   }) async {
@@ -578,18 +578,20 @@ class DatabaseHelper {
     required double nav,
     String feeType = 'A',
     String? note,
+    String? datetime,
   }) async {
     final fee = feeType == 'A' ? amount * 0.0015 : 0.0;
     final netAmount = amount - fee;
     final shares = nav > 0 ? netAmount / nav : 0;
     final now = _fmt.format(DateTime.now());
+    final txnDatetime = datetime ?? now;
     final d = await db;
     await d.transaction((txn) async {
       await txn.insert('transactions', {
         'id': _uuid.v4(), 'book_id': bookId,
         'account_id': fromAccountId, 'to_account_id': accountId,
         'type': 'invest', 'amount': amount,
-        'datetime': now, 'note': note ?? code,
+        'datetime': txnDatetime, 'note': note ?? code,
         'is_investment': 1, 'created_at': now,
       });
       await txn.rawUpdate(
@@ -650,6 +652,7 @@ class DatabaseHelper {
     required String toAccountId,
     required double shares,
     required double nav,
+    String? datetime,
   }) async {
     final d = await db;
     final rows = await d.query('investment_holdings',
@@ -661,28 +664,50 @@ class DatabaseHelper {
     if (shares > totalShares) throw Exception('卖出份额超过持仓');
     final sellAmount = shares * nav;
     final now = _fmt.format(DateTime.now());
+    final txnDatetime = datetime ?? now;
     final bookId = h['book_id'] as String;
     final accountId = h['account_id'] as String;
     final costSold = totalCost * (shares / totalShares);
+    final profit = sellAmount - costSold;
     final remainingShares = totalShares - shares;
     final remainingCost = totalCost - costSold;
 
     await d.transaction((txn) async {
+      // 1. 记录本金赎回
       await txn.insert('transactions', {
         'id': _uuid.v4(), 'book_id': bookId,
         'account_id': accountId, 'to_account_id': toAccountId,
-        'type': 'invest', 'amount': sellAmount,
-        'datetime': now, 'note': '卖出 ${h['code']}',
+        'type': 'invest', 'amount': costSold,
+        'datetime': txnDatetime, 'note': '赎回本金 ' + (h['code'] as String),
         'is_investment': 1, 'created_at': now,
       });
-      // 投资账户市值减少
+      // 2. 记录投资收益/亏损
+      if (profit.abs() > 0.01) {
+        final plType = profit >= 0 ? 'income' : 'expense';
+        final plNote = profit >= 0 ? '投资收益' : '投资亏损';
+        // 查找投资收益分类
+        final cats = await txn.query('categories',
+          where: "book_id=? AND name=? AND type='income'",
+          whereArgs: [bookId, '投资收益']);
+        final catId = cats.isNotEmpty ? cats.first['id'] as String : null;
+        await txn.insert('transactions', {
+          'id': _uuid.v4(), 'book_id': bookId,
+          'account_id': toAccountId, 'category_id': catId,
+          'type': plType, 'amount': profit.abs(),
+          'datetime': txnDatetime,
+          'note': '$plNote ' + (h['code'] as String),
+          'is_investment': 1, 'created_at': now,
+        });
+      }
+      // 3. 投资账户市值减少
       await txn.rawUpdate(
         'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
         [sellAmount, now, accountId]);
-      // 资金回到日常账户
+      // 4. 资金回到日常账户
       await txn.rawUpdate(
         'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
         [sellAmount, now, toAccountId]);
+      // 5. 更新持仓
       if (remainingShares <= 0.001) {
         await txn.update('investment_holdings',
           {'total_shares': 0, 'total_cost': 0, 'is_liquidated': 1, 'updated_at': now},

@@ -208,6 +208,8 @@ class _BuyFormState extends State<_BuyForm> {
   final _nameCtrl = TextEditingController();
   final _amountCtrl = TextEditingController();
   final _navCtrl = TextEditingController();
+  final _fmt = DateFormat('yyyy-MM-dd HH:mm');
+  DateTime _dateTime = DateTime.now();
   List<Account> _accounts = [];
   List<Account> _investAccounts = [];
   String? _fromAccountId;
@@ -258,6 +260,7 @@ class _BuyFormState extends State<_BuyForm> {
       amount: amount,
       nav: nav,
       feeType: _feeType,
+      datetime: _fmt.format(_dateTime),
     );
     widget.onSaved();
     if (mounted) Navigator.pop(context);
@@ -311,6 +314,20 @@ class _BuyFormState extends State<_BuyForm> {
                 .toList(),
             onChanged: (v) { if (v != null) setState(() => _toAccountId = v); },
           ),
+          const SizedBox(height: 12),
+          InkWell(
+            onTap: () async {
+              final d = await showDatePicker(context: context, initialDate: _dateTime, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 1)));
+              if (d == null) return;
+              final t = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(_dateTime));
+              if (t == null) return;
+              setState(() => _dateTime = DateTime(d.year, d.month, d.day, t.hour, t.minute));
+            },
+            child: InputDecorator(
+              decoration: const InputDecoration(labelText: '日期时间', border: OutlineInputBorder(), suffixIcon: Icon(Icons.access_time)),
+              child: Text(_fmt.format(_dateTime), style: const TextStyle(fontSize: 15)),
+            ),
+          ),
           const SizedBox(height: 20),
           FilledButton(
             onPressed: _saving ? null : _save,
@@ -335,6 +352,8 @@ class _SellForm extends StatefulWidget {
 class _SellFormState extends State<_SellForm> {
   final _sharesCtrl = TextEditingController();
   final _navCtrl = TextEditingController();
+  final _fmt = DateFormat('yyyy-MM-dd HH:mm');
+  DateTime _dateTime = DateTime.now();
   List<Account> _dailyAccounts = [];
   String? _toAccountId;
   bool _saving = false;
@@ -374,6 +393,7 @@ class _SellFormState extends State<_SellForm> {
         toAccountId: _toAccountId!,
         shares: shares,
         nav: nav,
+        datetime: _fmt.format(_dateTime),
       );
       widget.onSaved();
       if (mounted) Navigator.pop(context);
@@ -423,6 +443,34 @@ class _SellFormState extends State<_SellForm> {
                 .map((a) => DropdownMenuItem(value: a.id, child: Text("${a.name} (¥${a.balance.toStringAsFixed(2)})")))
                 .toList(),
             onChanged: (v) { if (v != null) setState(() => _toAccountId = v); },
+          ),
+          const SizedBox(height: 12),
+          InkWell(
+            onTap: () async {
+              final d = await showDatePicker(context: context, initialDate: _dateTime, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 1)));
+              if (d == null) return;
+              final t = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(_dateTime));
+              if (t == null) return;
+              setState(() => _dateTime = DateTime(d.year, d.month, d.day, t.hour, t.minute));
+            },
+            child: InputDecorator(
+              decoration: const InputDecoration(labelText: '日期时间', border: OutlineInputBorder(), suffixIcon: Icon(Icons.access_time)),
+              child: Text(_fmt.format(_dateTime), style: const TextStyle(fontSize: 15)),
+            ),
+          ),
+          const SizedBox(height: 12),
+          InkWell(
+            onTap: () async {
+              final d = await showDatePicker(context: context, initialDate: _dateTime, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 1)));
+              if (d == null) return;
+              final t = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(_dateTime));
+              if (t == null) return;
+              setState(() => _dateTime = DateTime(d.year, d.month, d.day, t.hour, t.minute));
+            },
+            child: InputDecorator(
+              decoration: const InputDecoration(labelText: '日期时间', border: OutlineInputBorder(), suffixIcon: Icon(Icons.access_time)),
+              child: Text(_fmt.format(_dateTime), style: const TextStyle(fontSize: 15)),
+            ),
           ),
           const SizedBox(height: 20),
           FilledButton(
