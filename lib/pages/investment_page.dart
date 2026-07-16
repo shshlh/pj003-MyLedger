@@ -47,10 +47,10 @@ class InvestmentPageState extends State<InvestmentPage> {
     );
   }
 
-  void _openSwitch() {
+  void _openSwitch([String? fromCode]) {
     showModalBottomSheet(
       context: context, isScrollControlled: true,
-      builder: (_) => _SwitchForm(bookId: widget.book.id, onSaved: refresh),
+      builder: (_) => _SwitchForm(bookId: widget.book.id, onSaved: refresh, initialFromCode: fromCode),
     );
   }
 
@@ -154,13 +154,15 @@ class InvestmentPageState extends State<InvestmentPage> {
                 ),
               PopupMenuButton<String>(
                 onSelected: (v) {
-                  if (v == "sell") _openSell(h);
-                  if (v == "nav") _openNavUpdate(h);
+                 if (v == "sell") _openSell(h);
+                 if (v == "nav") _openNavUpdate(h);
+                 if (v == "switch") _openSwitch(h["code"] as String?);
                 },
                 itemBuilder: (_) => [
                   if (!isLiquidated) ...[
                     const PopupMenuItem(value: "sell", child: Text("卖出")),
-                    const PopupMenuItem(value: "nav", child: Text("更新净值")),
+                  const PopupMenuItem(value: "nav", child: Text("更新净值")),
+                   const PopupMenuItem(value: "switch", child: Text("转换")),
                   ],
                 ],
               ),
@@ -493,9 +495,10 @@ class _SellFormState extends State<_SellForm> {
 
 /// 基金转换表单
 class _SwitchForm extends StatefulWidget {
-  final String bookId;
-  final VoidCallback onSaved;
-  const _SwitchForm({required this.bookId, required this.onSaved});
+ final String bookId;
+ final VoidCallback onSaved;
+  final String? initialFromCode;
+ const _SwitchForm({required this.bookId, required this.onSaved, this.initialFromCode});
   @override
   State<_SwitchForm> createState() => _SwitchFormState();
 }
@@ -520,7 +523,9 @@ class _SwitchFormState extends State<_SwitchForm> {
   @override
   void initState() {
     super.initState();
-    _load();
+    if (widget.initialFromCode != null && widget.initialFromCode!.isNotEmpty) {
+      _fromCodeCtrl.text = widget.initialFromCode!;
+    }
   }
 
   @override
