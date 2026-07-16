@@ -65,16 +65,13 @@ class TransactionListPageState extends State<TransactionListPage> {
     }
   }
 
-  Color _amountColor(String type) {
-    switch (type) {
-      case 'income':   return Colors.red;
-        return Colors.red;
-      case 'transfer': return Colors.blue;
-        return Colors.blue;
-      default:         return Colors.green;
-        return Colors.green;
-    }
-  }
+ Color _amountColor(String type) {
+   switch (type) {
+     case 'income':   return Colors.red;
+     case 'transfer': return Colors.blue;
+     default:         return Colors.green;
+   }
+ }
 
   String _amountPrefix(String type) {
     switch (type) {

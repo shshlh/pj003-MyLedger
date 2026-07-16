@@ -1,6 +1,5 @@
 import "package:flutter/material.dart";
 import "package:intl/intl.dart";
-import "package:uuid/uuid.dart";
 import "../database/database_helper.dart";
 import "../models/book.dart";
 import "../models/account.dart";
@@ -424,10 +423,11 @@ class _SellFormState extends State<_SellForm> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
       }
-    }
-  }
+   }
+    _load();
+ }
 
-  @override
+ @override
   Widget build(BuildContext context) {
     final totalShares = (widget.holding["total_shares"] as num).toDouble();
     return Padding(
@@ -526,6 +526,7 @@ class _SwitchFormState extends State<_SwitchForm> {
     if (widget.initialFromCode != null && widget.initialFromCode!.isNotEmpty) {
       _fromCodeCtrl.text = widget.initialFromCode!;
     }
+    _load();
   }
 
   @override
@@ -594,8 +595,7 @@ class _SwitchFormState extends State<_SwitchForm> {
 
   @override
   Widget build(BuildContext context) {
-    final dailies = _accounts.where((a) => a.type != "fund" && a.type != "credit").toList();
-    final funds = _accounts.where((a) => a.type == "fund").toList();
+   final dailies = _accounts.where((a) => a.type != "fund" && a.type != "credit").toList();
     return Padding(
       padding: EdgeInsets.fromLTRB(16, 24, 16, MediaQuery.of(context).viewInsets.bottom + 16),
       child: Column(
