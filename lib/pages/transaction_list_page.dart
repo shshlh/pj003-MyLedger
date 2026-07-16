@@ -169,17 +169,18 @@ class TransactionListPageState extends State<TransactionListPage> {
           String title;
           if (t.type == 'transfer') {
             title = '${account?.name ?? "?"} → ${toAccount?.name ?? "?"}';
-          } else if (t.type == 'invest') {
-            title = t.note ?? '赎回本金';
-          } else if (t.isInvestment == 1 && (t.type == 'income' || t.type == 'expense')) {
+         } else if (t.type == 'invest') {
+            final p = t.note?.split(' ') ?? [];
+            title = p.length >= 2 ? '\u4e70\u5165 ${p[1]}' : '\u8d4e\u56de\u672c\u91d1';
+         } else if (t.isInvestment == 1 && (t.type == 'income' || t.type == 'expense')) {
             title = t.note ?? '投资收益';
           } else {
             title = category?.name ?? '未分类';
           }
-          final subtitle = [
-            account?.name,
-            if (t.note != null && t.note!.isNotEmpty) t.note,
-          ].where((e) => e != null).join(' · ');
+         final subtitle = [
+           account?.name,
+            if (t.type == 'invest') _investDetail(t) ?? '' else if (t.note != null && t.note!.isNotEmpty) t.note,
+         ].where((e) => e != null).join(' · ');
 
           return Card(
             elevation: 0,
@@ -195,17 +196,9 @@ class TransactionListPageState extends State<TransactionListPage> {
               ),
               title: Text(title,
                   style: const TextStyle(fontWeight: FontWeight.w500)),
-              subtitle: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '${_formatDate(t.datetime)} · $subtitle',
-                    style: TextStyle(color: Colors.grey[600], fontSize: 13),
-                  ),
-                  if (t.type == 'invest' && _investDetail(t) != null)
-                    Text(_investDetail(t)!,
-                        style: TextStyle(color: Colors.grey[500], fontSize: 11)),
-                ],
+              subtitle: Text(
+                '${_formatDate(t.datetime)} · $subtitle',
+                style: TextStyle(color: Colors.grey[600], fontSize: 13),
               ),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -249,6 +242,17 @@ class TransactionListPageState extends State<TransactionListPage> {
   void _editTransaction(Transaction t) {
     final amountCtrl = TextEditingController(text: t.amount.toStringAsFixed(2));
     final noteCtrl = TextEditingController(text: t.note ?? '');
+    // 投资交易解析
+    String _nav = '', _shares = '', _fee = '';
+    if (t.type == 'invest' && t.note != null) {
+      final p = t.note!.split(' ');
+      if (p.length >= 3) _nav = p[2].replaceFirst('净值', '');
+      if (p.length >= 4) _shares = p[3].replaceFirst('份额', '');
+      if (p.length >= 5) _fee = p[4].replaceFirst('手续费', '');
+    }
+    final navCtrl = TextEditingController(text: _nav);
+    final sharesCtrl = TextEditingController(text: _shares);
+    final feeCtrl = TextEditingController(text: _fee);
     DateTime editDate = DateTime.parse(t.datetime);
     final fmt = DateFormat('yyyy-MM-dd HH:mm');
 
@@ -273,6 +277,17 @@ class TransactionListPageState extends State<TransactionListPage> {
                 decoration: const InputDecoration(
                     labelText: '金额', border: OutlineInputBorder()),
               ),
+              const SizedBox(height: 12),
+              if (t.type == 'invest') ...[
+                const SizedBox(height: 12),
+                Row(children: [
+                  Expanded(child: TextField(controller: navCtrl, keyboardType: TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: '净值', border: OutlineInputBorder(), isDense: true))),
+                  const SizedBox(width: 8),
+                  Expanded(child: TextField(controller: sharesCtrl, keyboardType: TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: '份额', border: OutlineInputBorder(), isDense: true))),
+                  const SizedBox(width: 8),
+                  Expanded(child: TextField(controller: feeCtrl, keyboardType: TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: '手续费', border: OutlineInputBorder(), isDense: true))),
+                ]),
+              ],
               const SizedBox(height: 12),
               TextField(
                 controller: noteCtrl,
@@ -313,18 +328,36 @@ class TransactionListPageState extends State<TransactionListPage> {
                   if (newAmount == null || newAmount <= 0) return;
                   final db = DatabaseHelper();
                   await db.deleteTransaction(t.id);
-                  await db.recordTransaction(
-                    bookId: t.bookId,
-                    accountId: t.accountId,
-                    toAccountId: t.toAccountId,
-                    categoryId: t.categoryId,
-                    type: t.type,
-                    amount: newAmount,
-                    note: noteCtrl.text.isNotEmpty ? noteCtrl.text : null,
-                    isInvestment: t.isInvestment,
-                    relatedInvestmentId: t.relatedInvestmentId,
-                    datetime: fmt.format(editDate),
-                  );
+                  if (t.type == 'invest') {
+                    final p = t.note?.split(' ') ?? [];
+                    final code = p.length >= 2 ? p[1] : '';
+                    await db.recordInvestment(
+                      bookId: t.bookId,
+                      accountId: t.toAccountId ?? t.accountId,
+                      fromAccountId: t.accountId,
+                      code: code,
+                      invType: 'fund',
+                      amount: newAmount,
+                      nav: double.tryParse(navCtrl.text) ?? 0,
+                      extraFee: double.tryParse(feeCtrl.text),
+                      extraShares: double.tryParse(sharesCtrl.text),
+                      note: noteCtrl.text.isNotEmpty ? noteCtrl.text : null,
+                      datetime: fmt.format(editDate),
+                    );
+                  } else {
+                    await db.recordTransaction(
+                      bookId: t.bookId,
+                      accountId: t.accountId,
+                      toAccountId: t.toAccountId,
+                      categoryId: t.categoryId,
+                      type: t.type,
+                      amount: newAmount,
+                      note: noteCtrl.text.isNotEmpty ? noteCtrl.text : null,
+                      isInvestment: t.isInvestment,
+                      relatedInvestmentId: t.relatedInvestmentId,
+                      datetime: fmt.format(editDate),
+                    );
+                  }
                   if (ctx.mounted) Navigator.pop(ctx);
                   if (mounted) refresh();
                 },
