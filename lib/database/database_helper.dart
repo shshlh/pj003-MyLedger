@@ -9,9 +9,13 @@ import '../models/transaction.dart';
 import '../models/periodic_bill.dart';
 
 class DatabaseHelper {
-  static final DatabaseHelper _instance = DatabaseHelper._();
-  factory DatabaseHelper() => _instance;
-  DatabaseHelper._();
+ static final DatabaseHelper _instance = DatabaseHelper._();
+ factory DatabaseHelper() => _instance;
+ DatabaseHelper._();
+
+  /// 测试专用：注入内存数据库，替代单例的生产数据库
+  static Database? _testDb;
+  static void useTestDatabase(Database? db) { _testDb = db; }
 
   Database? _db;
   final _uuid = const Uuid();
@@ -19,6 +23,7 @@ class DatabaseHelper {
   final _dayFmt = DateFormat('yyyy-MM-dd');
 
   Future<Database> get db async {
+    if (_testDb != null) return _testDb!;
     if (_db != null) return _db!;
     _db = await _initDb();
     return _db!;
