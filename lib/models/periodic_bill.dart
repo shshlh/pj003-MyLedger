@@ -11,10 +11,11 @@
    final String startDate;
    final String? endDate;
    final String nextRunDate;
-   final int enabled; // 0=暂停, 1=启用
-   final String createdAt;
- 
-   PeriodicBill({
+ final int enabled; // 0=暂停, 1=启用
+ final String createdAt;
+  final String? updatedAt;
+
+ PeriodicBill({
      required this.id,
      required this.bookId,
      required this.name,
@@ -27,11 +28,12 @@
      required this.startDate,
      this.endDate,
      required this.nextRunDate,
-     this.enabled = 1,
-     required this.createdAt,
-   });
- 
-   Map<String, dynamic> toMap() => {
+   this.enabled = 1,
+   required this.createdAt,
+    this.updatedAt,
+ });
+
+ Map<String, dynamic> toMap() => {
      'id': id,
      'book_id': bookId,
      'name': name,
@@ -44,11 +46,12 @@
      'start_date': startDate,
      'end_date': endDate,
      'next_run_date': nextRunDate,
-     'enabled': enabled,
-     'created_at': createdAt,
-   };
- 
-   factory PeriodicBill.fromMap(Map<String, dynamic> m) => PeriodicBill(
+   'enabled': enabled,
+   'created_at': createdAt,
+    'updated_at': updatedAt,
+ };
+
+ factory PeriodicBill.fromMap(Map<String, dynamic> m) => PeriodicBill(
      id: m['id'],
      bookId: m['book_id'],
      name: m['name'],
@@ -61,7 +64,8 @@
      startDate: m['start_date'],
      endDate: m['end_date'],
      nextRunDate: m['next_run_date'],
-     enabled: m['enabled'] ?? 1,
-     createdAt: m['created_at'],
-   );
+   enabled: m['enabled'] ?? 1,
+   createdAt: m['created_at'],
+    updatedAt: m['updated_at'],
+ );
  }

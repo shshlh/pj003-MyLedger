@@ -26,7 +26,7 @@ class DatabaseHelper {
 
   Future<Database> _initDb() async {
     final path = join(await getDatabasesPath(), 'account_book.db');
-    return openDatabase(path, version: 2, onCreate: _createTables, onUpgrade: _upgradeDb);
+    return openDatabase(path, version: 4, onCreate: _createTables, onUpgrade: _upgradeDb);
   }
 
   Future<void> _createTables(Database db, int version) async {
@@ -82,6 +82,7 @@ class DatabaseHelper {
         note TEXT,
         is_investment INTEGER NOT NULL DEFAULT 0,
         related_investment_id TEXT,
+        batch_id TEXT,
        created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
        FOREIGN KEY (book_id) REFERENCES books(id),
@@ -105,6 +106,7 @@ class DatabaseHelper {
         next_run_date TEXT NOT NULL,
         enabled INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
+        updated_at TEXT,
         FOREIGN KEY (book_id) REFERENCES books(id),
         FOREIGN KEY (account_id) REFERENCES accounts(id)
       )
@@ -131,7 +133,13 @@ class DatabaseHelper {
     ''');
   }
 
-  Future<void> _upgradeDb(Database db, int oldV, int newV) async {
+ Future<void> _upgradeDb(Database db, int oldV, int newV) async {
+    if (oldV < 4) {
+      await db.execute("ALTER TABLE periodic_bills ADD COLUMN updated_at TEXT");
+    }
+   if (oldV < 3) {
+      await db.execute("ALTER TABLE transactions ADD COLUMN batch_id TEXT");
+    }
     if (oldV < 2) {
       await db.execute('''
         CREATE TABLE IF NOT EXISTS investment_holdings (
@@ -234,6 +242,7 @@ class DatabaseHelper {
       isInvestment: isInvestment,
       relatedInvestmentId: relatedInvestmentId,
       createdAt: now,
+      updatedAt: now,
     );
     final d = await db;
     await d.transaction((txn) async {
@@ -286,9 +295,15 @@ class DatabaseHelper {
     });
   }
 
-  Future<List<Transaction>> getTransactions(String bookId, {int? limit, int? offset}) async {
+  Future<List<Transaction>> getTransactions(String bookId, {int? limit, int? offset, String? startDate}) async {
+    String where = 'book_id=?';
+    List args = [bookId];
+    if (startDate != null) {
+      where += ' AND datetime >= ?';
+      args.add(startDate);
+    }
     final list = await (await db).query('transactions',
-      where: 'book_id=?', whereArgs: [bookId],
+      where: where, whereArgs: args,
       orderBy: 'datetime DESC',
       limit: limit, offset: offset);
     return list.map((m) => Transaction.fromMap(m)).toList();
@@ -321,10 +336,23 @@ class DatabaseHelper {
       conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
-  Future<int> runDueBills() async {
-    final bills = await getDueBills();
-    for (final bill in bills) {
-      await recordTransaction(
+ Future<int> runDueBills() async {
+   final bills = await getDueBills();
+    final todayStr = _dayFmt.format(DateTime.now());
+   for (final bill in bills) {
+      // 去重：检查今天是否已生成过此账单
+      final dup = await (await db).query('transactions',
+        where: "book_id=? AND account_id=? AND amount=? AND note=? AND datetime LIKE ?",
+        whereArgs: [bill.bookId, bill.accountId, bill.amount, bill.name, '$todayStr%']);
+      if (dup.isNotEmpty) {
+        final next = _calcNextRun(bill);
+        final now = _fmt.format(DateTime.now());
+        await (await db).update('periodic_bills',
+          {'next_run_date': _dayFmt.format(next), 'updated_at': now},
+          where: 'id=?', whereArgs: [bill.id]);
+        continue;
+      }
+     await recordTransaction(
         bookId: bill.bookId, accountId: bill.accountId,
         categoryId: bill.categoryId, type: bill.type,
         amount: bill.amount, note: bill.name,
@@ -500,8 +528,9 @@ class DatabaseHelper {
          'type': 'transfer',
          'amount': amount,
           'datetime': txnDatetime,
-          'is_investment': 0,
-          'created_at': now,
+         'is_investment': 0,
+          'updated_at': now,
+         'created_at': now,
         });
         await txn.rawUpdate(
           'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
@@ -545,30 +574,110 @@ class DatabaseHelper {
         }
       }
 
-      if (t.type == 'expense') {
-        reverseFrom();
+     if (t.type == 'expense') {
+       reverseFrom();
       } else if (t.type == 'invest' && t.relatedInvestmentId != null) {
+        final isFromInvest = fromRows.isNotEmpty && (fromRows.first['type'] == 'fund' || fromRows.first['type'] == 'stock');
         final hRows = await txn.query('investment_holdings',
           where: 'id=?', whereArgs: [t.relatedInvestmentId]);
-        if (hRows.isNotEmpty) {
-          final h = hRows.first;
-          final oldShares = (h['total_shares'] as num).toDouble();
-          final oldCost = (h['total_cost'] as num).toDouble();
-          double costRatio = oldCost > 0 ? (t.amount / oldCost).clamp(0, 1) : 0;
-          double sharesToRemove = oldShares * costRatio;
-          double newShares = (oldShares - sharesToRemove).clamp(0, double.infinity);
-          double newCost = (oldCost - t.amount).clamp(0, double.infinity);
-          if (newShares <= 0.001) {
-            await txn.update('investment_holdings',
-              {'total_shares': 0, 'total_cost': 0, 'is_liquidated': 1, 'updated_at': t.createdAt},
-              where: 'id=?', whereArgs: [t.relatedInvestmentId]);
-          } else {
-            await txn.update('investment_holdings',
-              {'total_shares': newShares, 'total_cost': newCost, 'updated_at': t.createdAt},
-              where: 'id=?', whereArgs: [t.relatedInvestmentId]);
+        if (isFromInvest) {
+          // 卖出方向：持仓被减少，需要加回
+          if (hRows.isNotEmpty) {
+            final h = hRows.first;
+            final oldShares = (h['total_shares'] as num).toDouble();
+            final oldCost = (h['total_cost'] as num).toDouble();
+            if (oldCost <= 0.001) {
+              final estNav = (h['latest_nav'] as num?)?.toDouble() ?? 1.0;
+              final estimatedShares = estNav > 0 ? t.amount / estNav : 0;
+              await txn.update('investment_holdings', {
+                'total_shares': estimatedShares, 'total_cost': t.amount,
+                'is_liquidated': 0, 'updated_at': t.createdAt,
+              }, where: 'id=?', whereArgs: [t.relatedInvestmentId]);
+            } else {
+              final sharesToAdd = oldShares * (t.amount / oldCost);
+              await txn.update('investment_holdings', {
+                'total_shares': oldShares + sharesToAdd,
+                'total_cost': oldCost + t.amount,
+                'updated_at': t.createdAt,
+              }, where: 'id=?', whereArgs: [t.relatedInvestmentId]);
+            }
           }
-        }
-      } else if (t.type == 'income') {
+          // 计算卖出总金额 = 成本 + 关联盈亏
+          final plRows = await txn.query('transactions',
+            where: "batch_id=? AND type IN ('income','expense')",
+            whereArgs: [t.batchId]);
+          double profitAmount = 0;
+          for (final pl in plRows) {
+            final plAmt = (pl['amount'] as num).toDouble();
+            if (pl['type'] == 'income') profitAmount += plAmt;
+            else profitAmount -= plAmt;
+          }
+          final totalAmount = (t.amount + profitAmount).clamp(0, double.infinity);
+          // 回滚余额：投资账户 +totalAmount，日常账户 -totalAmount
+          if (t.toAccountId != null) {
+            await txn.rawUpdate(
+              'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
+              [totalAmount, t.createdAt, t.toAccountId!]);
+          }
+          await txn.rawUpdate(
+            'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+            [totalAmount, t.createdAt, t.accountId]);
+          // 删除关联盈亏记录
+          for (final pl in plRows) {
+            await txn.delete('transactions', where: 'id=?', whereArgs: [pl['id']]);
+          }
+        } else {
+          // 买入方向：持仓被增加，需要减回
+          if (hRows.isNotEmpty) {
+            final h = hRows.first;
+           final oldShares = (h['total_shares'] as num).toDouble();
+           final oldCost = (h['total_cost'] as num).toDouble();
+            // 优先从 note 解析份额（精确值），失败时按金额比例估算
+            double sharesToRemove;
+            final noteParts = t.note?.split(' ');
+            if (noteParts != null && noteParts.length >= 5 && noteParts[0] == '买入') {
+              sharesToRemove = double.tryParse(noteParts[3].replaceFirst('份额', '')) ?? oldShares * (oldCost > 0 ? (t.amount / oldCost).clamp(0, 1) : 0);
+            } else {
+              sharesToRemove = oldShares * (oldCost > 0 ? (t.amount / oldCost).clamp(0, 1) : 0);
+            }
+           double newShares = (oldShares - sharesToRemove).clamp(0, double.infinity);
+            double newCost = (oldCost - t.amount).clamp(0, double.infinity);
+            if (newShares <= 0.001) {
+              await txn.update('investment_holdings',
+                {'total_shares': 0, 'total_cost': 0, 'is_liquidated': 1, 'updated_at': t.createdAt},
+                where: 'id=?', whereArgs: [t.relatedInvestmentId]);
+            } else {
+              await txn.update('investment_holdings',
+                {'total_shares': newShares, 'total_cost': newCost, 'updated_at': t.createdAt},
+                where: 'id=?', whereArgs: [t.relatedInvestmentId]);
+            }
+          }
+          // 回滚余额：来源账户 +amount（日常加回），目标账户 -amount（投资扣回）
+          await txn.rawUpdate(
+            'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+            [t.amount, t.createdAt, t.accountId]);
+          if (t.toAccountId != null) {
+            await txn.rawUpdate(
+              'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
+             [t.amount, t.createdAt, t.toAccountId!]);
+         }
+          // 重算投资账户市值（覆盖简单减法带来的手续费误差）
+          if (t.toAccountId != null) {
+            final allH = await txn.query('investment_holdings',
+              where: "account_id=? AND is_liquidated=0",
+              whereArgs: [t.toAccountId]);
+            double tv = 0;
+            for (final h2 in allH) {
+              final s = (h2['total_shares'] as num).toDouble();
+              final n = (h2['latest_nav'] as num?)?.toDouble();
+              if (n != null) tv += s * n;
+            }
+            await txn.rawUpdate(
+              'UPDATE accounts SET balance = ?, updated_at = ? WHERE id = ?',
+              [tv, t.createdAt, t.toAccountId!]);
+          }
+       }
+     } else if (t.type == 'income') {
         await txn.rawUpdate(
           'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
           [t.amount, t.createdAt, t.accountId]);
@@ -627,7 +736,7 @@ class DatabaseHelper {
         'account_id': fromAccountId, 'to_account_id': accountId,
         'type': 'invest', 'amount': amount,
         'datetime': txnDatetime, 'note': detailNote,
-        'is_investment': 1, 'created_at': now,
+       'is_investment': 1, 'updated_at': now, 'created_at': now,
       });
       await txn.rawUpdate(
         'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
@@ -749,13 +858,14 @@ class DatabaseHelper {
     final remainingCost = totalCost - costSold;
 
     await d.transaction((txn) async {
+      final batchId = _uuid.v4();
       // 1. 记录本金赎回
       await txn.insert('transactions', {
         'id': _uuid.v4(), 'book_id': bookId,
         'account_id': accountId, 'to_account_id': toAccountId,
         'type': 'invest', 'amount': costSold,
         'datetime': txnDatetime, 'note': '赎回本金 ' + (h['code'] as String),
-        'is_investment': 1, 'created_at': now,
+        'is_investment': 1, 'related_investment_id': id, 'batch_id': batchId, 'updated_at': now, 'created_at': now,
       });
       // 2. 记录投资收益/亏损
       if (profit.abs() > 0.01) {
@@ -772,7 +882,7 @@ class DatabaseHelper {
           'type': plType, 'amount': profit.abs(),
           'datetime': txnDatetime,
           'note': '$plNote ' + (h['code'] as String),
-          'is_investment': 1, 'created_at': now,
+          'is_investment': 1, 'related_investment_id': id, 'batch_id': batchId, 'updated_at': now, 'created_at': now,
         });
       }
       // 3. 投资账户市值减少
@@ -830,13 +940,14 @@ class DatabaseHelper {
     final fromAmount = fromShares * fromNav;
 
     await d.transaction((txn) async {
+      final batchId = _uuid.v4();
       // 卖出A
       await txn.insert('transactions', {
         'id': _uuid.v4(), 'book_id': bookId,
         'account_id': fromAccountId,
         'type': 'invest', 'amount': fromAmount,
         'datetime': txnD, 'note': '转换转出 ' + (h['code'] as String),
-        'is_investment': 1, 'created_at': now,
+        'is_investment': 1, 'related_investment_id': fromHoldingId, 'batch_id': batchId, 'updated_at': now, 'created_at': now,
       });
       if (remainingShares <= 0.001) {
         await txn.update('investment_holdings',
@@ -875,7 +986,7 @@ class DatabaseHelper {
           'account_id': fromAccountId,
           'type': 'expense', 'amount': fee,
           'datetime': txnD, 'note': '转换手续费',
-          'is_investment': 1, 'created_at': now,
+          'is_investment': 1, 'related_investment_id': fromHoldingId, 'batch_id': batchId, 'updated_at': now, 'created_at': now,
         });
       }
       // 退回
@@ -885,7 +996,7 @@ class DatabaseHelper {
           'account_id': refundAccountId,
           'type': 'income', 'amount': refund,
           'datetime': txnD, 'note': '转换退回',
-          'is_investment': 1, 'created_at': now,
+          'is_investment': 1, 'related_investment_id': fromHoldingId, 'batch_id': batchId, 'updated_at': now, 'created_at': now,
         });
         await txn.rawUpdate(
           'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',

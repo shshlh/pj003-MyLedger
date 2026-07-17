@@ -33,7 +33,8 @@ class TransactionListPageState extends State<TransactionListPage> {
   Future<void> refresh() async {
     setState(() => _loading = true);
     final db = DatabaseHelper();
-    final txns = await db.getTransactions(widget.book.id);
+    final threeMonthsAgo = DateFormat('yyyy-MM-dd').format(DateTime.now().subtract(const Duration(days: 90)));
+    final txns = await db.getTransactions(widget.book.id, startDate: threeMonthsAgo);
     final accounts = await db.getAccounts(widget.book.id);
     final cats = await db.getCategories(widget.book.id);
     if (!mounted) return;
@@ -77,9 +78,9 @@ class TransactionListPageState extends State<TransactionListPage> {
 
  Color _amountColor(String type) {
    switch (type) {
-     case 'income':   return Colors.red;
+     case 'income':   return Colors.green;
      case 'transfer': return Colors.blue;
-     default:         return Colors.green;
+     default:         return Colors.red;
    }
  }
 
@@ -328,22 +329,34 @@ class TransactionListPageState extends State<TransactionListPage> {
                   if (newAmount == null || newAmount <= 0) return;
                   final db = DatabaseHelper();
                   await db.deleteTransaction(t.id);
-                  if (t.type == 'invest') {
+                 if (t.type == 'invest') {
                     final p = t.note?.split(' ') ?? [];
-                    final code = p.length >= 2 ? p[1] : '';
-                    await db.recordInvestment(
-                      bookId: t.bookId,
-                      accountId: t.toAccountId ?? t.accountId,
-                      fromAccountId: t.accountId,
-                      code: code,
-                      invType: 'fund',
-                      amount: newAmount,
-                      nav: double.tryParse(navCtrl.text) ?? 0,
-                      extraFee: double.tryParse(feeCtrl.text),
-                      extraShares: double.tryParse(sharesCtrl.text),
-                      note: noteCtrl.text.isNotEmpty ? noteCtrl.text : null,
-                      datetime: fmt.format(editDate),
-                    );
+                    final firstWord = p.isNotEmpty ? p[0] : '';
+                    if (firstWord == '买入') {
+                      final code = p.length >= 2 ? p[1] : '';
+                      await db.recordInvestment(
+                        bookId: t.bookId,
+                        accountId: t.toAccountId ?? t.accountId,
+                        fromAccountId: t.accountId,
+                        code: code,
+                        invType: 'fund',
+                        amount: newAmount,
+                        nav: double.tryParse(navCtrl.text) ?? 0,
+                        extraFee: double.tryParse(feeCtrl.text),
+                        extraShares: double.tryParse(sharesCtrl.text),
+                        note: noteCtrl.text.isNotEmpty ? noteCtrl.text : null,
+                        datetime: fmt.format(editDate),
+                      );
+                    } else {
+                      if (ctx.mounted) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          const SnackBar(content: Text('已还原持仓和余额。编辑卖出/转换记录请到投资页面操作。')),
+                        );
+                      }
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      if (mounted) refresh();
+                      return;
+                    }
                   } else {
                     await db.recordTransaction(
                       bookId: t.bookId,

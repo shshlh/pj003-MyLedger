@@ -159,9 +159,9 @@ class StatisticsPageState extends State<StatisticsPage> {
     final balance = _totalIncome - _totalExpense;
     return Row(
       children: [
-        _summaryCard('支出', _totalExpense, Colors.green),
+        _summaryCard('支出', _totalExpense, Colors.red),
         const SizedBox(width: 8),
-        _summaryCard('收入', _totalIncome, Colors.red),
+        _summaryCard('收入', _totalIncome, Colors.green),
         const SizedBox(width: 8),
         _summaryCard('结余', balance, balance >= 0 ? Colors.blue : Colors.red),
       ],

@@ -135,8 +135,8 @@ class HomePageState extends State<HomePage> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                _statItem('支出', expense, Colors.green),
-                _statItem('收入', income, Colors.red),
+                _statItem('支出', expense, Colors.red),
+                _statItem('收入', income, Colors.green),
                 _statItem('结余', balance, balance >= 0 ? Colors.blue : Colors.red),
               ],
             ),

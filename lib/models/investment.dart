@@ -4,9 +4,10 @@ class InvestmentHolding {
   final String accountId;
   final String code;
   final String? name;
-  final String invType;
-  final double totalCost;
-  final double totalShares;
+ final String invType;
+  /// 成本基数（累计买入金额 - 累计卖出按比例扣减的成本，非累计投入总额）
+ final double totalCost;
+ final double totalShares;
   final double? latestNav;
   final String? navDate;
   final String feeType;
