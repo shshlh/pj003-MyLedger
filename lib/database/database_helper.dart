@@ -82,8 +82,9 @@ class DatabaseHelper {
         note TEXT,
         is_investment INTEGER NOT NULL DEFAULT 0,
         related_investment_id TEXT,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (book_id) REFERENCES books(id),
+       created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+       FOREIGN KEY (book_id) REFERENCES books(id),
         FOREIGN KEY (account_id) REFERENCES accounts(id),
         FOREIGN KEY (category_id) REFERENCES categories(id)
       )
@@ -250,11 +251,20 @@ class DatabaseHelper {
             'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
             [amount, now, accountId]);
         }
-      } else if (type == 'income') {
-        await txn.rawUpdate(
-          'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
-          [amount, now, accountId]);
-      } else if (type == 'transfer') {
+     } else if (type == 'income') {
+        final incRows = await txn.query('accounts',
+          columns: ['type'], where: 'id=?', whereArgs: [accountId]);
+        final isCredit = incRows.isNotEmpty && incRows.first['type'] == 'credit';
+        if (isCredit) {
+          await txn.rawUpdate(
+            'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
+            [amount, now, accountId]);
+        } else {
+         await txn.rawUpdate(
+           'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+           [amount, now, accountId]);
+        }
+     } else if (type == 'transfer') {
         await txn.rawUpdate(
           'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
           [amount, now, accountId]);
