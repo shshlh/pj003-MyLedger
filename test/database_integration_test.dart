@@ -183,4 +183,30 @@ void main() {
       await fx.db.close();
     });
   });
+
+
+  group('直接编辑', () {
+    test('修改金额后余额正确调整', () async {
+      final fx = await _setup();
+      await DatabaseHelper().recordTransaction(bookId:fx.bookId, accountId:fx.debitId, categoryId:fx.catFoodId, type:'expense', amount:100);
+      final txns = await DatabaseHelper().getTransactions(fx.bookId);
+      final txnId = txns.first.id;
+      await DatabaseHelper().updateTransactionAmount(id:txnId, amount:150);
+      expect((await fx.db.query('accounts',columns:['balance'],where:'id=?',whereArgs:[fx.debitId])).first['balance'], closeTo(9850, 0.01));
+      final updated = await fx.db.query('transactions',where:'id=?',whereArgs:[txnId]);
+      expect((updated.first['amount'] as num).toDouble(), closeTo(150, 0.01));
+      expect((await fx.db.rawQuery('SELECT COUNT(*) as c FROM transactions')).first['c'], 1, reason: '不应新增记录');
+      await fx.db.close();
+    });
+    test('修改备注不改变余额', () async {
+      final fx = await _setup();
+      await DatabaseHelper().recordTransaction(bookId:fx.bookId, accountId:fx.debitId, categoryId:fx.catFoodId, type:'expense', amount:200);
+      final txns = await DatabaseHelper().getTransactions(fx.bookId);
+      await DatabaseHelper().updateTransactionAmount(id:txns.first.id, amount:200, note:'改为晚餐');
+      expect((await fx.db.query('accounts',columns:['balance'],where:'id=?',whereArgs:[fx.debitId])).first['balance'], closeTo(9800, 0.01));
+      final updated = await fx.db.query('transactions',where:'id=?',whereArgs:[txns.first.id]);
+      expect(updated.first['note'], '改为晚餐');
+      await fx.db.close();
+    });
+  });
 }

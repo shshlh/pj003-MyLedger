@@ -18,9 +18,11 @@ class TransactionListPage extends StatefulWidget {
 class TransactionListPageState extends State<TransactionListPage> {
   List<Transaction> _transactions = [];
   Map<String, Account> _accountMap = {};
-  Map<String, Category> _categoryMap = {};
-  bool _loading = true;
-  Map<int, Map<int, List<Transaction>>> _grouped = {};
+ Map<String, Category> _categoryMap = {};
+ List<Account> _filterAccounts = [];
+  String? _filterAccountId;
+ bool _loading = true;
+ Map<int, Map<int, List<Transaction>>> _grouped = {};
   final Set<String> _expandedMonths = {};
 
   @override
@@ -33,9 +35,9 @@ class TransactionListPageState extends State<TransactionListPage> {
   Future<void> refresh() async {
     setState(() => _loading = true);
     final db = DatabaseHelper();
-    final threeMonthsAgo = DateFormat('yyyy-MM-dd').format(DateTime.now().subtract(const Duration(days: 90)));
-    final txns = await db.getTransactions(widget.book.id, startDate: threeMonthsAgo);
-    final accounts = await db.getAccounts(widget.book.id);
+   final threeMonthsAgo = DateFormat('yyyy-MM-dd').format(DateTime.now().subtract(const Duration(days: 90)));
+    final txns = await db.getTransactions(widget.book.id, startDate: threeMonthsAgo, accountId: _filterAccountId);
+   final accounts = await db.getAccounts(widget.book.id);
     final cats = await db.getCategories(widget.book.id);
     if (!mounted) return;
     final grouped = <int, Map<int, List<Transaction>>>{};
@@ -48,11 +50,12 @@ class TransactionListPageState extends State<TransactionListPage> {
     setState(() {
       _transactions = txns;
       _grouped = grouped;
-      _accountMap = {for (final a in accounts) a.id: a};
-      _categoryMap = {for (final c in cats) c.id: c};
-      _loading = false;
-    });
-  }
+     _accountMap = {for (final a in accounts) a.id: a};
+     _categoryMap = {for (final c in cats) c.id: c};
+      _filterAccounts = accounts;
+     _loading = false;
+   });
+ }
 
   String _formatDate(String iso) {
     try {
@@ -95,29 +98,66 @@ class TransactionListPageState extends State<TransactionListPage> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+ @override
+ Widget build(BuildContext context) {
+   if (_loading) return const Center(child: CircularProgressIndicator());
 
-    if (_transactions.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.receipt_long, size: 64, color: Colors.grey[400]),
-            const SizedBox(height: 8),
-            Text('暂无交易记录',
-                style: TextStyle(color: Colors.grey[600], fontSize: 16)),
-          ],
+    return Column(
+      children: [
+        _buildAccountFilter(),
+        Expanded(
+          child: _transactions.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.receipt_long, size: 64, color: Colors.grey[400]),
+                      const SizedBox(height: 8),
+                      Text('暂无交易记录',
+                          style: TextStyle(color: Colors.grey[600], fontSize: 16)),
+                    ],
+                  ),
+                )
+              : RefreshIndicator(
+                  onRefresh: refresh,
+                  child: ListView(
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                    children: _buildGroupedList(),
+                  ),
+                ),
         ),
-      );
-    }
+      ],
+    );
+  }
 
-    return RefreshIndicator(
-      onRefresh: refresh,
-      child: ListView(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-        children: _buildGroupedList(),
+  Widget _buildAccountFilter() {
+    if (_filterAccounts.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: Row(
+        children: [
+          const Icon(Icons.account_balance_wallet, size: 18, color: Colors.grey),
+          const SizedBox(width: 8),
+          Expanded(
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: _filterAccountId,
+                isExpanded: true,
+                onChanged: (v) {
+                  setState(() => _filterAccountId = v);
+                  refresh();
+                },
+                items: [
+                  const DropdownMenuItem(value: '', child: Text('全部账户', style: TextStyle(fontSize: 14))),
+                  ..._filterAccounts.map((a) => DropdownMenuItem(
+                    value: a.id,
+                    child: Text(a.name, style: const TextStyle(fontSize: 14)),
+                  )),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -327,9 +367,9 @@ class TransactionListPageState extends State<TransactionListPage> {
                 onPressed: () async {
                   final newAmount = double.tryParse(amountCtrl.text);
                   if (newAmount == null || newAmount <= 0) return;
-                  final db = DatabaseHelper();
-                  await db.deleteTransaction(t.id);
+                 final db = DatabaseHelper();
                  if (t.type == 'invest') {
+                    await db.deleteTransaction(t.id);
                     final p = t.note?.split(' ') ?? [];
                     final firstWord = p.isNotEmpty ? p[0] : '';
                     if (firstWord == '买入') {
@@ -357,17 +397,11 @@ class TransactionListPageState extends State<TransactionListPage> {
                       if (mounted) refresh();
                       return;
                     }
-                  } else {
-                    await db.recordTransaction(
-                      bookId: t.bookId,
-                      accountId: t.accountId,
-                      toAccountId: t.toAccountId,
-                      categoryId: t.categoryId,
-                      type: t.type,
+                 } else {
+                    await db.updateTransactionAmount(
+                      id: t.id,
                       amount: newAmount,
                       note: noteCtrl.text.isNotEmpty ? noteCtrl.text : null,
-                      isInvestment: t.isInvestment,
-                      relatedInvestmentId: t.relatedInvestmentId,
                       datetime: fmt.format(editDate),
                     );
                   }

@@ -297,17 +297,82 @@ class DatabaseHelper {
           }
         }
       }
+   });
+ }
+
+  /// 直接修改交易金额/备注/日期（delta 调余额，不再删重建）
+  Future<void> updateTransactionAmount({
+    required String id,
+    required double amount,
+    String? note,
+    String? datetime,
+    String? categoryId,
+  }) async {
+    final d = await db;
+    final rows = await d.query('transactions', where: 'id=?', whereArgs: [id]);
+    if (rows.isEmpty) return;
+    final t = Transaction.fromMap(rows.first);
+    final delta = amount - t.amount;
+    final now = _fmt.format(DateTime.now());
+    final txnDatetime = datetime ?? t.datetime;
+
+    if (delta == 0 && note == null && datetime == null && categoryId == null) return;
+
+    await d.transaction((txn) async {
+      if (delta != 0) {
+        final fromRows = await txn.query('accounts',
+          columns: ['type'], where: 'id=?', whereArgs: [t.accountId]);
+        final isCredit = fromRows.isNotEmpty && fromRows.first['type'] == 'credit';
+
+        if (t.type == 'expense' || t.type == 'invest') {
+          await txn.rawUpdate(
+            isCredit
+              ? 'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?'
+              : 'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
+            [delta, now, t.accountId]);
+        } else if (t.type == 'income') {
+          await txn.rawUpdate(
+            isCredit
+              ? 'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?'
+              : 'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+            [delta, now, t.accountId]);
+        } else if (t.type == 'transfer') {
+          await txn.rawUpdate(
+            'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
+            [delta, now, t.accountId]);
+          if (t.toAccountId != null) {
+            final toRows = await txn.query('accounts',
+              columns: ['type'], where: 'id=?', whereArgs: [t.toAccountId]);
+            final isToCredit = toRows.isNotEmpty && toRows.first['type'] == 'credit';
+            await txn.rawUpdate(
+              isToCredit
+                ? 'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?'
+                : 'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+              [delta, now, t.toAccountId!]);
+          }
+        }
+      }
+
+      final updates = <String, dynamic>{'updated_at': now, 'datetime': txnDatetime};
+      if (amount != t.amount) updates['amount'] = amount;
+      if (note != null) updates['note'] = note;
+      if (categoryId != null) updates['category_id'] = categoryId;
+      await txn.update('transactions', updates, where: 'id=?', whereArgs: [id]);
     });
   }
 
-  Future<List<Transaction>> getTransactions(String bookId, {int? limit, int? offset, String? startDate}) async {
-    String where = 'book_id=?';
-    List args = [bookId];
-    if (startDate != null) {
-      where += ' AND datetime >= ?';
-      args.add(startDate);
+Future<List<Transaction>> getTransactions(String bookId, {int? limit, int? offset, String? startDate, String? accountId}) async {
+   String where = 'book_id=?';
+   List args = [bookId];
+   if (startDate != null) {
+     where += ' AND datetime >= ?';
+     args.add(startDate);
+   }
+    if (accountId != null) {
+      where += ' AND (account_id=? OR to_account_id=?)';
+      args.addAll([accountId, accountId]);
     }
-    final list = await (await db).query('transactions',
+   final list = await (await db).query('transactions',
       where: where, whereArgs: args,
       orderBy: 'datetime DESC',
       limit: limit, offset: offset);
