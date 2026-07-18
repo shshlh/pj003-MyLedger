@@ -1058,8 +1058,8 @@ class DatabaseHelper {
       await txn.insert('transactions', {
         'id': _uuid.v4(), 'book_id': bookId,
         'account_id': accountId, 'to_account_id': toAccountId,
-        'type': 'invest', 'amount': costSold,
-        'datetime': txnDatetime, 'note': '赎回本金 ' + (h['code'] as String),
+        'type': 'invest', 'amount': netAmount,
+        'datetime': txnDatetime, 'note': '赎回 ' + (h['code'] as String),
         'is_investment': 1, 'related_investment_id': id, 'batch_id': batchId, 'updated_at': now, 'created_at': now,
       });
       // 2. 记录投资收益/亏损
