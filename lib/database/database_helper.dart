@@ -1169,7 +1169,7 @@ class DatabaseHelper {
         await txn.insert('investment_holdings', {
           'id': bHoldingId, 'book_id': bookId, 'account_id': fromAccountId,
           'code': toCode, 'name': toName, 'inv_type': 'fund',
-          'total_cost': fromAmount, 'total_shares': toShares,
+          'total_cost': fromAmount - refund, 'total_shares': toShares,
           'latest_nav': toNav, 'nav_date': txnD, 'fee_type': 'custom',
           'is_liquidated': 0, 'created_at': now, 'updated_at': now,
         });
@@ -1178,7 +1178,7 @@ class DatabaseHelper {
       await txn.insert('transactions', {
         'id': _uuid.v4(), 'book_id': bookId,
         'account_id': fromAccountId,
-        'type': 'invest', 'amount': fromAmount,
+        'type': 'invest', 'amount': fromAmount - refund,
         'datetime': txnD, 'note': '转换转入 ' + (toCode),
         'is_investment': 1, 'related_investment_id': bHoldingId, 'batch_id': batchId,
         'updated_at': now, 'created_at': now,
