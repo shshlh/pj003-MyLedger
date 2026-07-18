@@ -154,9 +154,9 @@ class _InvestmentDetailPageState extends State<InvestmentDetailPage> {
 
   Widget _txnCard(Transaction t) {
     final parts = t.note?.split(" ") ?? [];
-    final typeLabel = parts.isNotEmpty ? (parts[0] == "买入" ? "买入" : parts[0] == "赎回本金" ? "赎回" : parts[0] == "转换转出" ? "转出" : parts[0] == "投资收益" ? "收益" : parts[0] == "投资亏损" ? "亏损" : t.type) : t.type;
-    final Color iconColor = typeLabel == "买入" ? Colors.blue : typeLabel == "收益" ? Colors.green : typeLabel == "亏损" ? Colors.red : Colors.orange;
-    final IconData icon = typeLabel == "买入" ? Icons.shopping_cart : typeLabel == "赎回" || typeLabel == "转出" ? Icons.sell : Icons.trending_up;
+    final typeLabel = parts.isNotEmpty ? (parts[0] == "买入" ? "买入" : parts[0] == "赎回本金" ? "赎回" : parts[0] == "转换转出" ? "转出" : parts[0] == "赎回手续费" ? "手续费" : parts[0] == "投资收益" ? "收益" : parts[0] == "投资亏损" ? "亏损" : t.type) : t.type;
+    final Color iconColor = typeLabel == "买入" ? Colors.blue : typeLabel == "收益" ? Colors.green : typeLabel == "亏损" ? Colors.red : typeLabel == "手续费" ? Colors.grey : Colors.orange;
+    final IconData icon = typeLabel == "买入" ? Icons.shopping_cart : typeLabel == "赎回" || typeLabel == "转出" ? Icons.sell : typeLabel == "手续费" ? Icons.money_off : Icons.trending_up;
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 3),
