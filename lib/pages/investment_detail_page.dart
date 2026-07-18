@@ -24,7 +24,8 @@ class _InvestmentDetailPageState extends State<InvestmentDetailPage> {
     _load();
   }
 
-  Future<void> _load() async {
+ Future<void> _load() async {
+    try {
     final db = DatabaseHelper();
     final txns = await db.getHoldingTransactions(widget.holding["id"]);
     double invested = 0, returned = 0;
@@ -33,29 +34,33 @@ class _InvestmentDetailPageState extends State<InvestmentDetailPage> {
       if (p.isNotEmpty && p[0] == "买入") invested += t.amount;
       if (p.isNotEmpty && p[0] == "赎回本金") returned += t.amount;
     }
-    if (!mounted) return;
-    setState(() {
-      _transactions = txns;
-      _totalInvested = invested;
-      _totalReturned = returned;
-      _loading = false;
-    });
-  }
+   if (!mounted) return;
+   setState(() {
+     _transactions = txns;
+     _totalInvested = invested;
+     _totalReturned = returned;
+     _loading = false;
+   });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+ }
 
   @override
   Widget build(BuildContext context) {
     final h = widget.holding;
     final shares = (h["total_shares"] as num).toDouble();
     final cost = (h["total_cost"] as num).toDouble();
-   final num? nav = h['latest_nav'] is num ? h['latest_nav'] as num : null;
+    final num? nav = h['latest_nav'] is num ? h['latest_nav'] as num : null;
     final double? navDbl = nav?.toDouble();
     final marketValue = navDbl != null ? shares * navDbl : cost;
-   final profit = marketValue - cost;
-   final profitRate = cost > 0 ? (profit / cost * 100) : 0.0;
-   final isLiquidated = (h["is_liquidated"] as int? ?? 0) == 1;
-   final account = widget.accountMap[h["account_id"]];
+    final profit = marketValue - cost;
+    final profitRate = cost > 0 ? (profit / cost * 100) : 0.0;
+    final isLiquidated = (h["is_liquidated"] as int? ?? 0) == 1;
+    final account = widget.accountMap[h["account_id"]];
     final avgCost = shares > 0 ? cost / shares : 0.0;
-   final totalPL = marketValue + _totalReturned - _totalInvested;
+    final totalPL = marketValue + _totalReturned - _totalInvested;
     final invName = h["name"] as String? ?? h["code"];
 
     return Scaffold(
