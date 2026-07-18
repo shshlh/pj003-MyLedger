@@ -362,10 +362,100 @@ class DatabaseHelper {
       if (note != null) updates['note'] = note;
       if (categoryId != null) updates['category_id'] = categoryId;
       await txn.update('transactions', updates, where: 'id=?', whereArgs: [id]);
+   });
+ }
+
+  /// 原地更新投资买入记录：金额/净值/份额变化时按差值调整持仓和余额
+  /// 不删重建，不留清仓垃圾
+  Future<void> updateInvestmentBuy({
+    required String id,
+    required double amount,
+    required double nav,
+    double? extraFee,
+    double? extraShares,
+    String? note,
+    String? datetime,
+  }) async {
+    final d = await db;
+    final rows = await d.query('transactions', where: 'id=?', whereArgs: [id]);
+    if (rows.isEmpty) return;
+    final t = Transaction.fromMap(rows.first);
+    final holdingId = t.relatedInvestmentId;
+    final oldAmount = t.amount;
+    final amountDelta = amount - oldAmount;
+    final now = _fmt.format(DateTime.now());
+    final txnDatetime = datetime ?? t.datetime;
+
+    // 从旧 note 解析旧份额
+    double oldShares = 0;
+    final noteParts = t.note?.split(' ');
+    if (noteParts != null && noteParts.length >= 5) {
+      oldShares = double.tryParse(noteParts[3].replaceFirst('份额', '')) ?? 0;
+    }
+
+    // 计算新份额
+    final fee = extraFee ?? 0.0;
+    final newShares = extraShares ?? (nav > 0 ? (amount - fee) / nav : 0);
+    final sharesDelta = newShares - oldShares;
+
+    await d.transaction((txn) async {
+      // 1. 调整扣款账户余额（delta 方向与支出一致）
+      if (amountDelta != 0) {
+        final fromRows = await txn.query('accounts',
+          columns: ['type'], where: 'id=?', whereArgs: [t.accountId]);
+        final isCredit = fromRows.isNotEmpty && fromRows.first['type'] == 'credit';
+        await txn.rawUpdate(
+          isCredit
+            ? 'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?'
+            : 'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
+          [amountDelta, now, t.accountId]);
+      }
+
+      // 2. 调整持仓
+      if (holdingId != null && (sharesDelta != 0 || amountDelta != 0)) {
+        final hRows = await txn.query('investment_holdings',
+          where: 'id=?', whereArgs: [holdingId]);
+        if (hRows.isNotEmpty) {
+          final h = hRows.first;
+          final oldS = (h['total_shares'] as num).toDouble();
+          final oldC = (h['total_cost'] as num).toDouble();
+          final newS = (oldS + sharesDelta).clamp(0, double.infinity);
+          final newC = (oldC + amountDelta).clamp(0, double.infinity);
+          await txn.update('investment_holdings', {
+            'total_shares': newS, 'total_cost': newC,
+            'latest_nav': nav, 'nav_date': now, 'updated_at': now,
+          }, where: 'id=?', whereArgs: [holdingId]);
+        }
+      }
+
+      // 3. 重算投资账户市值
+      if (t.toAccountId != null) {
+        final allH = await txn.query('investment_holdings',
+          where: "account_id=? AND is_liquidated=0",
+          whereArgs: [t.toAccountId]);
+        double tv = 0;
+        for (final h2 in allH) {
+          final s = (h2['total_shares'] as num).toDouble();
+          final n = (h2['latest_nav'] as num?)?.toDouble();
+          if (n != null) tv += s * n;
+        }
+        await txn.rawUpdate(
+          'UPDATE accounts SET balance = ?, updated_at = ? WHERE id = ?',
+          [tv, now, t.toAccountId!]);
+      }
+
+      // 4. 更新交易记录
+      final newNote = '买入 ' + (note ?? '') + ' 净值$nav 份额${newShares.toStringAsFixed(2)} 手续费${fee.toStringAsFixed(2)}';
+      await txn.update('transactions', {
+        'amount': amount,
+        'datetime': txnDatetime,
+        'note': newNote,
+        'updated_at': now,
+      }, where: 'id=?', whereArgs: [id]);
     });
   }
 
-Future<List<Transaction>> getTransactions(String bookId, {int? limit, int? offset, String? startDate, String? accountId}) async {
+  Future<List<Transaction>> getTransactions(String bookId, {int? limit, int? offset, String? startDate, String? accountId}) async {
    String where = 'book_id=?';
    List args = [bookId];
    if (startDate != null) {

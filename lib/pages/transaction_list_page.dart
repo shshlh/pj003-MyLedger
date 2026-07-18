@@ -368,23 +368,18 @@ class TransactionListPageState extends State<TransactionListPage> {
                   final newAmount = double.tryParse(amountCtrl.text);
                   if (newAmount == null || newAmount <= 0) return;
                  final db = DatabaseHelper();
-                 if (t.type == 'invest') {
-                    await db.deleteTransaction(t.id);
+                if (t.type == 'invest') {
                     final p = t.note?.split(' ') ?? [];
                     final firstWord = p.isNotEmpty ? p[0] : '';
                     if (firstWord == '买入') {
                       final code = p.length >= 2 ? p[1] : '';
-                      await db.recordInvestment(
-                        bookId: t.bookId,
-                        accountId: t.toAccountId ?? t.accountId,
-                        fromAccountId: t.accountId,
-                        code: code,
-                        invType: 'fund',
+                      await db.updateInvestmentBuy(
+                        id: t.id,
                         amount: newAmount,
                         nav: double.tryParse(navCtrl.text) ?? 0,
                         extraFee: double.tryParse(feeCtrl.text),
                         extraShares: double.tryParse(sharesCtrl.text),
-                        note: noteCtrl.text.isNotEmpty ? noteCtrl.text : null,
+                        note: code,
                         datetime: fmt.format(editDate),
                       );
                     } else {

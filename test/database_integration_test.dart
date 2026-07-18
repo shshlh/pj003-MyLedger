@@ -208,5 +208,19 @@ void main() {
       expect(updated.first['note'], '改为晚餐');
       await fx.db.close();
     });
-  });
+  
+    test('编辑买入记录仅改日期不影响持仓', () async {
+      final fx = await _setup();
+      await DatabaseHelper().recordInvestment(bookId:fx.bookId, accountId:fx.investId, fromAccountId:fx.debitId, code:'000001', invType:'fund', amount:5000, nav:1.0, feeType:'C', datetime:'2026-07-01 10:00');
+      final txns = await DatabaseHelper().getTransactions(fx.bookId);
+      final txnId = txns.first.id;
+      await DatabaseHelper().updateInvestmentBuy(id:txnId, amount:5000, nav:1.0, datetime:'2026-07-15 10:00');
+      final holdings = await DatabaseHelper().getInvestments(fx.bookId);
+      expect(holdings.length, 1, reason: '持仓不应被清仓重建');
+      expect(holdings.first['is_liquidated'], 0, reason: '不应被标记为清仓');
+      final updated = await fx.db.query('transactions',where:'id=?',whereArgs:[txnId]);
+      expect(updated.first['datetime'].toString().startsWith('2026-07-15'), true);
+      await fx.db.close();
+    });
+});
 }
