@@ -47,14 +47,15 @@ class _InvestmentDetailPageState extends State<InvestmentDetailPage> {
     final h = widget.holding;
     final shares = (h["total_shares"] as num).toDouble();
     final cost = (h["total_cost"] as num).toDouble();
-    final num? nav = h['latest_nav'] is num ? h['latest_nav'] as num : null;
-    final marketValue = nav != null ? shares * nav : cost;
-    final profit = marketValue - cost;
-    final profitRate = cost > 0 ? (profit / cost * 100) : 0.0;
-    final isLiquidated = (h["is_liquidated"] as int? ?? 0) == 1;
-    final account = widget.accountMap[h["account_id"]];
-    final avgCost = shares > 0 ? cost / shares : 0;
-    final totalPL = marketValue + _totalReturned - _totalInvested;
+   final num? nav = h['latest_nav'] is num ? h['latest_nav'] as num : null;
+    final double? navDbl = nav?.toDouble();
+    final marketValue = navDbl != null ? shares * navDbl : cost;
+   final profit = marketValue - cost;
+   final profitRate = cost > 0 ? (profit / cost * 100) : 0.0;
+   final isLiquidated = (h["is_liquidated"] as int? ?? 0) == 1;
+   final account = widget.accountMap[h["account_id"]];
+    final avgCost = shares > 0 ? cost / shares : 0.0;
+   final totalPL = marketValue + _totalReturned - _totalInvested;
     final invName = h["name"] as String? ?? h["code"];
 
     return Scaffold(
