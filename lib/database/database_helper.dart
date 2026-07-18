@@ -815,6 +815,25 @@ class DatabaseHelper {
                 {'total_shares': newShares, 'total_cost': newCost, 'updated_at': t.createdAt},
                 where: 'id=?', whereArgs: [t.relatedInvestmentId]);
             }
+            // 回滚净值到该持仓剩下最近一条买入记录的净值
+            if (newShares > 0.001 && t.relatedInvestmentId != null) {
+              final lastRows = await txn.query('transactions',
+                where: "related_investment_id=? AND type='invest' AND note LIKE '买入 %' AND id != ?",
+                whereArgs: [t.relatedInvestmentId, id],
+                orderBy: 'datetime DESC', limit: 1);
+              if (lastRows.isNotEmpty) {
+                final lastNote = (lastRows.first['note'] as String?) ?? '';
+                final nParts = lastNote.split(' ');
+                if (nParts.length >= 3) {
+                  final parsedNav = double.tryParse(nParts[2].replaceFirst('净值', ''));
+                  if (parsedNav != null && parsedNav > 0) {
+                    await txn.update('investment_holdings',
+                      {'latest_nav': parsedNav, 'updated_at': t.createdAt},
+                      where: 'id=?', whereArgs: [t.relatedInvestmentId]);
+                  }
+                }
+              }
+            }
           }
           // 回滚余额：来源账户 +amount（日常加回），目标账户 -amount（投资扣回）
           await txn.rawUpdate(
