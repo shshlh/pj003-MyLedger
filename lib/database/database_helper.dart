@@ -963,7 +963,16 @@ class DatabaseHelper {
   Future<Map<String, dynamic>?> getInvestment(String id) async {
     final list = await (await db).query('investment_holdings',
       where: 'id=?', whereArgs: [id]);
-    return list.isNotEmpty ? list.first : null;
+   return list.isNotEmpty ? list.first : null;
+ }
+
+  /// 获取指定持仓的全部关联交易（按时间倒序）
+  Future<List<Transaction>> getHoldingTransactions(String holdingId) async {
+    final list = await (await db).query('transactions',
+      where: 'related_investment_id=?',
+      whereArgs: [holdingId],
+      orderBy: 'datetime DESC');
+    return list.map((m) => Transaction.fromMap(m)).toList();
   }
 
   /// 更新净值

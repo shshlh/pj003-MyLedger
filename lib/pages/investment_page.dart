@@ -3,6 +3,7 @@ import "package:intl/intl.dart";
 import "../database/database_helper.dart";
 import "../models/book.dart";
 import "../models/account.dart";
+import "investment_detail_page.dart";
 
 class InvestmentPage extends StatefulWidget {
   final Book book;
@@ -122,11 +123,13 @@ class InvestmentPageState extends State<InvestmentPage> {
     final profitRate = cost > 0 ? (profit / cost * 100) : 0.0;
     final isLiquidated = (h["is_liquidated"] as int? ?? 0) == 1;
     final account = _accountMap[h["account_id"]];
-    final avgCost = shares > 0 ? cost / shares : 0;
+   final avgCost = shares > 0 ? cost / shares : 0;
 
-    return Card(
+   return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
-      child: Padding(
+      child: InkWell(
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => InvestmentDetailPage(holding: h, accountMap: _accountMap))),
+        child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -187,9 +190,10 @@ class InvestmentPageState extends State<InvestmentPage> {
           ],
         ),
       ),
+      ),
     );
   }
-
+  
   Widget _infoItem(String label, String value) {
     return Padding(
       padding: const EdgeInsets.only(right: 16),
