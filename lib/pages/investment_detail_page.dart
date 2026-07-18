@@ -31,8 +31,9 @@ class _InvestmentDetailPageState extends State<InvestmentDetailPage> {
     double invested = 0, returned = 0;
     for (final t in txns) {
       final p = t.note?.split(" ") ?? [];
-      if (p.isNotEmpty && p[0] == "买入") invested += t.amount;
-      if (p.isNotEmpty && p[0] == "赎回本金") returned += t.amount;
+     if (p.isNotEmpty && p[0] == "买入") invested += t.amount;
+      if (p.isNotEmpty && p[0] == "转换转入") invested += t.amount;
+     if (p.isNotEmpty && p[0] == "赎回本金") returned += t.amount;
     }
    if (!mounted) return;
    setState(() {

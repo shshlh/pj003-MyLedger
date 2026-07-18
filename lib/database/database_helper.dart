@@ -1147,15 +1147,17 @@ class DatabaseHelper {
           where: 'id=?', whereArgs: [fromHoldingId]);
       } else {
         await txn.update('investment_holdings',
-          {'total_shares': remainingShares, 'total_cost': remainingCost, 'updated_at': now},
+          {'total_shares': remainingShares, 'total_cost': remainingCost, 'latest_nav': fromNav, 'nav_date': txnD, 'updated_at': now},
           where: 'id=?', whereArgs: [fromHoldingId]);
       }
       // 买入B
       final existing = await txn.query('investment_holdings',
         where: "book_id=? AND account_id=? AND code=? AND is_liquidated=0",
         whereArgs: [bookId, fromAccountId, toCode]);
+      String bHoldingId;
       if (existing.isNotEmpty) {
         final o = existing.first;
+        bHoldingId = o['id'] as String;
         final oldShares = (o['total_shares'] as num).toDouble();
         final oldCost = (o['total_cost'] as num).toDouble();
         await txn.update('investment_holdings',
@@ -1163,14 +1165,24 @@ class DatabaseHelper {
            'latest_nav': toNav, 'nav_date': txnD, 'updated_at': now},
           where: 'id=?', whereArgs: [o['id']]);
       } else {
+        bHoldingId = _uuid.v4();
         await txn.insert('investment_holdings', {
-          'id': _uuid.v4(), 'book_id': bookId, 'account_id': fromAccountId,
+          'id': bHoldingId, 'book_id': bookId, 'account_id': fromAccountId,
           'code': toCode, 'name': toName, 'inv_type': 'fund',
           'total_cost': fromAmount, 'total_shares': toShares,
           'latest_nav': toNav, 'nav_date': txnD, 'fee_type': 'custom',
           'is_liquidated': 0, 'created_at': now, 'updated_at': now,
         });
       }
+      // 记录B的转入交易（供详情页追溯累计投入）
+      await txn.insert('transactions', {
+        'id': _uuid.v4(), 'book_id': bookId,
+        'account_id': fromAccountId,
+        'type': 'invest', 'amount': fromAmount,
+        'datetime': txnD, 'note': '转换转入 ' + (toCode),
+        'is_investment': 1, 'related_investment_id': bHoldingId, 'batch_id': batchId,
+        'updated_at': now, 'created_at': now,
+      });
       // 手续费
       if (fee > 0) {
         await txn.insert('transactions', {

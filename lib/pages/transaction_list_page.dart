@@ -212,7 +212,13 @@ class TransactionListPageState extends State<TransactionListPage> {
             title = '${account?.name ?? "?"} → ${toAccount?.name ?? "?"}';
          } else if (t.type == 'invest') {
             final p = t.note?.split(' ') ?? [];
-            title = p.length >= 2 ? '\u4e70\u5165 ${p[1]}' : '\u8d4e\u56de\u672c\u91d1';
+            if (p.isNotEmpty && p[0] == '\u8f6c\u6362\u8f6c\u51fa') {
+              title = '\u8f6c\u6362\u8f6c\u51fa ${p.length >= 2 ? p[1] : ''}';
+            } else if (p.isNotEmpty && p[0] == '\u8d4e\u56de\u672c\u91d1') {
+              title = '\u8d4e\u56de ${p.length >= 2 ? p[1] : ''}';
+            } else {
+              title = p.length >= 2 ? '\u4e70\u5165 ${p[1]}' : '\u8d4e\u56de\u672c\u91d1';
+            }
          } else if (t.isInvestment == 1 && (t.type == 'income' || t.type == 'expense')) {
             title = t.note ?? '投资收益';
           } else {
