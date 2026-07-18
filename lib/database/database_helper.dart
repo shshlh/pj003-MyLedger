@@ -31,7 +31,7 @@ class DatabaseHelper {
 
   Future<Database> _initDb() async {
     final path = join(await getDatabasesPath(), 'account_book.db');
-    return openDatabase(path, version: 4, onCreate: _createTables, onUpgrade: _upgradeDb);
+    return openDatabase(path, version: 5, onCreate: _createTables, onUpgrade: _upgradeDb);
   }
 
   Future<void> _createTables(Database db, int version) async {
@@ -138,10 +138,14 @@ class DatabaseHelper {
     ''');
   }
 
- Future<void> _upgradeDb(Database db, int oldV, int newV) async {
-    if (oldV < 4) {
-      await db.execute("ALTER TABLE periodic_bills ADD COLUMN updated_at TEXT");
+  Future<void> _upgradeDb(Database db, int oldV, int newV) async {
+    if (oldV < 5) {
+      await db.execute("ALTER TABLE transactions ADD COLUMN updated_at TEXT");
     }
+    if (oldV < 4) {
+     await db.execute("ALTER TABLE periodic_bills ADD COLUMN updated_at TEXT");
+      await db.execute("ALTER TABLE transactions ADD COLUMN updated_at TEXT");
+   }
    if (oldV < 3) {
       await db.execute("ALTER TABLE transactions ADD COLUMN batch_id TEXT");
     }
