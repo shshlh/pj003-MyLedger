@@ -1024,11 +1024,12 @@ class DatabaseHelper {
   }
 
   /// 卖出部分份额：资金回到指定账户
-  Future<void> sellInvestment({
+ Future<void> sellInvestment({
     required String id,
     required String toAccountId,
     required double shares,
     required double nav,
+    double? extraFee,
     String? datetime,
   }) async {
     final d = await db;
@@ -1039,8 +1040,10 @@ class DatabaseHelper {
     final totalShares = (h['total_shares'] as num).toDouble();
     final totalCost = (h['total_cost'] as num).toDouble();
     if (shares > totalShares) throw Exception('卖出份额超过持仓');
-    final sellAmount = shares * nav;
-    final now = _fmt.format(DateTime.now());
+   final sellAmount = shares * nav;
+    final fee = extraFee ?? 0.0;
+    final netAmount = sellAmount - fee;
+   final now = _fmt.format(DateTime.now());
     final txnDatetime = datetime ?? now;
     final bookId = h['book_id'] as String;
     final accountId = h['account_id'] as String;
@@ -1076,15 +1079,26 @@ class DatabaseHelper {
           'note': '$plNote ' + (h['code'] as String),
           'is_investment': 1, 'related_investment_id': id, 'batch_id': batchId, 'updated_at': now, 'created_at': now,
         });
+     }
+      // 赎回手续费（不计入日常支出，仅影响投资盈亏）
+      if (fee > 0.001) {
+        await txn.insert('transactions', {
+          'id': _uuid.v4(), 'book_id': bookId,
+          'account_id': toAccountId,
+          'type': 'expense', 'amount': fee,
+          'datetime': txnDatetime, 'note': '赎回手续费 ' + (h['code'] as String),
+          'is_investment': 1, 'related_investment_id': id, 'batch_id': batchId,
+          'updated_at': now, 'created_at': now,
+        });
       }
-      // 3. 投资账户市值减少
+     // 3. 投资账户市值减少
       await txn.rawUpdate(
         'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
         [sellAmount, now, accountId]);
       // 4. 资金回到日常账户
       await txn.rawUpdate(
         'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
-        [sellAmount, now, toAccountId]);
+        [netAmount, now, toAccountId]);
       // 5. 更新持仓
       if (remainingShares <= 0.001) {
         await txn.update('investment_holdings',

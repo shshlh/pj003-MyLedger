@@ -376,10 +376,11 @@ class _SellForm extends StatefulWidget {
 }
 
 class _SellFormState extends State<_SellForm> {
-  final _sharesCtrl = TextEditingController();
-  final _navCtrl = TextEditingController();
-  final _fmt = DateFormat('yyyy-MM-dd HH:mm');
-  DateTime _dateTime = DateTime.now();
+ final _sharesCtrl = TextEditingController();
+ final _navCtrl = TextEditingController();
+  final _feeCtrl = TextEditingController();
+ final _fmt = DateFormat('yyyy-MM-dd HH:mm');
+ DateTime _dateTime = DateTime.now();
   List<Account> _dailyAccounts = [];
   String? _toAccountId;
   bool _saving = false;
@@ -393,10 +394,10 @@ class _SellFormState extends State<_SellForm> {
   }
 
   @override
-  void dispose() {
-    _sharesCtrl.dispose(); _navCtrl.dispose();
-    super.dispose();
-  }
+ void dispose() {
+    _sharesCtrl.dispose(); _navCtrl.dispose(); _feeCtrl.dispose();
+   super.dispose();
+ }
 
   Future<void> _load() async {
     final accs = await DatabaseHelper().getAccounts(widget.bookId);
@@ -409,17 +410,19 @@ class _SellFormState extends State<_SellForm> {
   Future<void> _save() async {
     final totalShares = (widget.holding["total_shares"] as num).toDouble();
     final shares = _liquidateAll ? totalShares : (double.tryParse(_sharesCtrl.text) ?? 0);
-    final nav = double.tryParse(_navCtrl.text);
-    if (shares <= 0 || shares > totalShares || nav == null || nav <= 0) return;
+   final nav = double.tryParse(_navCtrl.text);
+    final fee = double.tryParse(_feeCtrl.text) ?? 0;
+   if (shares <= 0 || shares > totalShares || nav == null || nav <= 0) return;
     if (_toAccountId == null) return;
     setState(() => _saving = true);
     try {
       await DatabaseHelper().sellInvestment(
         id: widget.holding["id"],
         toAccountId: _toAccountId!,
-        shares: shares,
-        nav: nav,
-        datetime: _fmt.format(_dateTime),
+       shares: shares,
+       nav: nav,
+        extraFee: fee > 0 ? fee : null,
+       datetime: _fmt.format(_dateTime),
       );
       widget.onSaved();
       if (mounted) Navigator.pop(context);
@@ -462,10 +465,29 @@ class _SellFormState extends State<_SellForm> {
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             decoration: const InputDecoration(labelText: "卖出净值", border: OutlineInputBorder()),
           ),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            value: _toAccountId,
-            decoration: const InputDecoration(labelText: "到账账户", border: OutlineInputBorder()),
+         const SizedBox(height: 12),
+          TextField(
+            controller: _feeCtrl,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(labelText: "赎回手续费（可选）", border: OutlineInputBorder(), hintText: "默认 0"),
+          ),
+          const SizedBox(height: 4),
+          Builder(builder: (ctx) {
+            final s = _liquidateAll ? (widget.holding["total_shares"] as num).toDouble() : (double.tryParse(_sharesCtrl.text) ?? 0);
+            final n = double.tryParse(_navCtrl.text) ?? 0;
+            final f = double.tryParse(_feeCtrl.text) ?? 0;
+            final gross = s * n;
+            final net = (gross - f).clamp(0, double.infinity);
+            if (gross <= 0) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text("净到账: ¥${NumberFormat("#,##0.00").format(net)}",
+                  style: TextStyle(fontSize: 14, color: Colors.grey[700])),
+            );
+          }),
+         DropdownButtonFormField<String>(
+           value: _toAccountId,
+           decoration: const InputDecoration(labelText: "到账账户", border: OutlineInputBorder()),
             items: _dailyAccounts
                 .map((a) => DropdownMenuItem(value: a.id, child: Text("${a.name} (¥${a.balance.toStringAsFixed(2)})")))
                 .toList(),
