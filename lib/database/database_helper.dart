@@ -1048,7 +1048,7 @@ class DatabaseHelper {
     final bookId = h['book_id'] as String;
     final accountId = h['account_id'] as String;
     final costSold = totalCost * (shares / totalShares);
-    final profit = sellAmount - costSold;
+    final profit = netAmount - costSold;
     final remainingShares = totalShares - shares;
     final remainingCost = totalCost - costSold;
 
@@ -1080,17 +1080,6 @@ class DatabaseHelper {
           'is_investment': 1, 'related_investment_id': id, 'batch_id': batchId, 'updated_at': now, 'created_at': now,
         });
      }
-      // 赎回手续费（不计入日常支出，仅影响投资盈亏）
-      if (fee > 0.001) {
-        await txn.insert('transactions', {
-          'id': _uuid.v4(), 'book_id': bookId,
-          'account_id': toAccountId,
-          'type': 'expense', 'amount': fee,
-          'datetime': txnDatetime, 'note': '赎回手续费 ' + (h['code'] as String),
-          'is_investment': 1, 'related_investment_id': id, 'batch_id': batchId,
-          'updated_at': now, 'created_at': now,
-        });
-      }
      // 3. 投资账户市值减少
       await txn.rawUpdate(
         'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
