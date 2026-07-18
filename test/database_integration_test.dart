@@ -81,6 +81,21 @@ void main() {
     });
   });
 
+  group('信用卡账单周期', () {
+    test('账单计算正确，退款减少在途', () async {
+      final fx = await _setup();
+      await fx.db.update('accounts', {'billing_day': 20, 'repayment_day': 14}, where:'id=?', whereArgs:[fx.creditId]);
+      await DatabaseHelper().recordTransaction(bookId:fx.bookId, accountId:fx.creditId, categoryId:fx.catFoodId, type:'expense', amount:10, datetime:'2026-06-17 12:00');
+      await DatabaseHelper().recordTransaction(bookId:fx.bookId, accountId:fx.creditId, categoryId:fx.catFoodId, type:'expense', amount:20, datetime:'2026-06-20 12:00');
+      await DatabaseHelper().recordTransaction(bookId:fx.bookId, accountId:fx.creditId, categoryId:fx.catFoodId, type:'income', amount:5, datetime:'2026-06-25 12:00');
+      final summary = await DatabaseHelper().getCreditCardSummary(fx.bookId);
+      expect(summary.length, 1);
+      expect((summary.first['amount_due'] as num).toDouble(), closeTo(10, 0.01), reason: '应还=上期10元');
+      expect((summary.first['current_spent'] as num).toDouble(), closeTo(15, 0.01), reason: '在途=20-5=15元');
+      await fx.db.close();
+    });
+  });
+
   group('投资', () {
     test('买入后持仓和余额正确', () async {
       final fx = await _setup();

@@ -628,15 +628,15 @@ class DatabaseHelper {
      final prevEnd = _fmt.format(prevEndDt);
 
       final curSpent = await d.rawQuery(
-        "SELECT COALESCE(SUM(amount), 0) AS total FROM transactions "
-        "WHERE book_id=? AND account_id=? AND type='expense' "
+        "SELECT COALESCE(SUM(CASE WHEN type='expense' THEN amount WHEN type='income' THEN -amount ELSE 0 END), 0) AS total FROM transactions "
+        "WHERE book_id=? AND account_id=? AND type IN ('expense','income') "
         "AND is_investment=0 AND datetime >= ? AND datetime < ?",
         [bookId, card['id'], curStart, curEnd]);
       final currentSpent = (curSpent.first['total'] as num).toDouble();
 
       final due = await d.rawQuery(
-        "SELECT COALESCE(SUM(amount), 0) AS total FROM transactions "
-        "WHERE book_id=? AND account_id=? AND type='expense' "
+        "SELECT COALESCE(SUM(CASE WHEN type='expense' THEN amount WHEN type='income' THEN -amount ELSE 0 END), 0) AS total FROM transactions "
+        "WHERE book_id=? AND account_id=? AND type IN ('expense','income') "
         "AND is_investment=0 AND datetime >= ? AND datetime < ?",
         [bookId, card['id'], prevStart, prevEnd]);
       final dueRepaid = await d.rawQuery(
